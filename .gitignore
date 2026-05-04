@@ -1,0 +1,4 @@
+.env
+.openwebui-pipelines
+openwebui_pipelines/**/valves.json
+.idea
