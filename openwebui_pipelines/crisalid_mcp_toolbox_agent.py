@@ -1,4 +1,5 @@
-from typing import Generator, Iterator, Union
+from collections.abc import Generator
+from typing import Iterator, Union
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -39,6 +40,26 @@ class Pipeline:
     ) -> Union[str, Generator, Iterator]:
         langchain_messages = to_langchain_messages(messages)
 
-        response = self.agent.invoke(langchain_messages)
-
-        return str(response.content)
+        for item in self.agent.stream(langchain_messages):
+            if isinstance(item, str):
+                yield item
+            elif item.get("type") == "tool_call":
+                yield {
+                    "event": {
+                        "type": "status",
+                        "data": {
+                            "description": f"Calling tool: {item['name']}",
+                            "done": False,
+                        },
+                    }
+                }
+            elif item.get("type") == "tools_done":
+                yield {
+                    "event": {
+                        "type": "status",
+                        "data": {
+                            "description": "Tools done",
+                            "done": True,
+                        },
+                    }
+                }
