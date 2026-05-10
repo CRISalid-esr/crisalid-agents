@@ -10,9 +10,14 @@ from langgraph.graph.message import MessagesState
 from langgraph.prebuilt import ToolNode
 
 from common.llm import build_chat_model
-from neo4j_mcp_toolbox_agent.mcp_toolbox_client import MCPToolboxClient
+from crisalid_graph_agent.mcp_toolbox_client import MCPToolboxClient
 
-PROMPT_PATH = Path(__file__).resolve().parent / "mcp_toolbox_prompt.txt"
+_PROMPT_DIR = Path(__file__).resolve().parent
+
+_TOOLSET_PROMPTS: dict[str, str] = {
+    "crisalid-restricted": "mcp_toolbox_restricted_prompt.txt",
+    "crisalid-unrestricted": "mcp_toolbox_unrestricted_prompt.txt",
+}
 
 
 def _parse_raw_tool_calls(content: str) -> list[dict] | None:
@@ -74,14 +79,27 @@ class MCPToolboxGraphFactory:
     async def abuild_graph(self):
         llm = build_chat_model()
         tools = await self.toolbox_client.aload_tools()
-        system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
+        toolset = self.toolbox_client.toolset_name
+        prompt_file = _TOOLSET_PROMPTS.get(toolset, "mcp_toolbox_restricted_prompt.txt")
+        system_prompt = (_PROMPT_DIR / prompt_file).read_text(encoding="utf-8")
 
-        llm_with_tools = llm.bind_tools(tools) | RunnableLambda(_fix_raw_tool_calls)
+        llm_with_tools = (
+            llm.bind_tools(tools).with_retry(
+                retry_if_exception_type=(ValueError,),
+                stop_after_attempt=3,
+            )
+            | RunnableLambda(_fix_raw_tool_calls)
+        )
         tool_node = ToolNode(tools)
 
         async def call_model(state: MessagesState):
             messages = [SystemMessage(content=system_prompt)] + state["messages"]
-            return {"messages": [await llm_with_tools.ainvoke(messages)]}
+            try:
+                return {"messages": [await llm_with_tools.ainvoke(messages)]}
+            except ValueError:
+                # The model returned an empty stream (e.g. transient API error).
+                # Return a plain AIMessage so the graph exits cleanly instead of crashing.
+                return {"messages": [AIMessage(content="The model returned an empty response. Please try again.")]}
 
         def should_continue(state: MessagesState):
             if state["messages"][-1].tool_calls:

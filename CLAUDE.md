@@ -29,7 +29,7 @@ The layering is strict: core agents have no knowledge of the interface that call
 ```
 openwebui_pipelines/   ← OpenWebUI adapters (convert messages, call agents)
 neo4j_cypher_agent/    ← Agent 1: generates Cypher, executes it, answers in natural language
-neo4j_mcp_toolbox_agent/ ← Agent 2: calls MCP Toolbox tools via LangGraph ReAct agent
+crisalid_graph_agent/  ← Agent 2: calls MCP Toolbox tools via LangGraph ReAct agent
 common/                ← Shared LLM factory (OpenAI or ILAAS/vLLM)
 ```
 
@@ -40,12 +40,13 @@ Uses LangChain's `GraphCypherQAChain`. Given a natural language question, it gen
 - `cypher_qa_chain.py` — chain configuration, prompt, few-shot examples
 - `lc_graph.py` — single-node LangGraph wrapping the chain
 
-### Agent 2 — MCP Toolbox Agent
+### Agent 2 — CRISalid Graph Agent (`crisalid_graph_agent/`)
 
 Connects at runtime to an external MCP Toolbox server (`CRISALID_MCP_TOOLBOX_URL`) and loads named toolsets (`CRISALID_MCP_TOOLBOX_TOOLSET`, default `"crisalid-restricted"`). Builds a LangGraph ReAct agent from those tools.
 
 - `mcp_toolbox_client.py` — connects to toolbox, loads tools
 - `lc_graph.py` — `MCPToolboxGraphFactory` (lazy init: graph built on first `ainvoke()`)
+- `crisalid_graph_agent.py` — `CrisalidGraphAgent` (public interface: `invoke`, `astream`, `stream`)
 
 ### OpenWebUI Pipelines
 
