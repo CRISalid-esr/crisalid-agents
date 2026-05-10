@@ -30,7 +30,7 @@ The layering is strict: core agents have no knowledge of the interface that call
 openwebui_pipelines/   ← OpenWebUI adapters (convert messages, call agents)
 neo4j_cypher_agent/    ← Agent 1: generates Cypher, executes it, answers in natural language
 crisalid_graph_agent/  ← Agent 2: calls MCP Toolbox tools via LangGraph ReAct agent
-common/                ← Shared LLM factory (OpenAI or ILAAS/vLLM)
+common/                ← Shared LLM factory (any OpenAI-compatible endpoint)
 ```
 
 ### Agent 1 — Neo4j Cypher Agent
@@ -58,9 +58,9 @@ The pipelines server runs on `http://localhost:9099` and is treated by OpenWebUI
 
 | Variable | Purpose |
 |---|---|
-| `LLM_PROVIDER` | `ilaas` (default) or `openai` |
-| `ILAAS_API_URL` / `ILAAS_API_KEY` / `ILAAS_API_MODEL` | ILAAS/vLLM provider |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI provider (default model: `gpt-4o-mini`) |
+| `MODEL` | Model name (e.g. `mistral-medium-250523`, `gpt-4o-mini`) |
+| `API_KEY` | API key for the LLM endpoint |
+| `LLM_API_BASE` | Base URL of the OpenAI-compatible endpoint (omit for OpenAI default) |
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | Neo4j connection |
 | `CRISALID_MCP_TOOLBOX_URL` | MCP Toolbox server URL |
 | `CRISALID_MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox |
