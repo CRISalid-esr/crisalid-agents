@@ -71,6 +71,9 @@ Install the OpenWebUI Pipelines server dependencies into the current uv virtual 
 uv pip install -r .openwebui-pipelines/requirements.txt
 ```
 
+> **Note:** `uv sync` (run automatically by `uv add` / `uv remove`) resets the virtual environment to `pyproject.toml`
+> only, removing any extras installed with `uv pip install`. Re-run the line above after every dependency change.
+
 This is required because .openwebui-pipelines/start.sh launches the Pipelines FastAPI server from the cloned vendor
 project. The crisalid-agents project dependencies and the Pipelines server dependencies live in the same local .venv
 during development.

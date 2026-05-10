@@ -5,7 +5,7 @@ from pathlib import Path
 from langchain_core.prompts import PromptTemplate
 from langchain_neo4j import GraphCypherQAChain, Neo4jGraph
 
-from neo4j_cypher_agent.llm import build_chat_model
+from common.llm import build_chat_model
 
 BASE_DIR = Path(__file__).resolve().parent
 
