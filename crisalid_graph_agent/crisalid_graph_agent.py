@@ -46,6 +46,10 @@ class CrisalidGraphAgent:
         # be paired with the matching tool result from the tools node.
         pending_tool_calls: dict[str, dict] = {}
 
+        # tool_result dicts buffered after the tools node and held until
+        # postprocess_schema has had a chance to override their content.
+        buffered_tool_results: dict[str, dict] = {}
+
         async for part in graph.astream(
             {"messages": messages},
             stream_mode=["messages", "updates"],
@@ -67,19 +71,30 @@ class CrisalidGraphAgent:
                         }
 
                 elif "tools" in data:
-                    # The tools node just finished. Pair each ToolMessage with its
-                    # pending call and emit a tool_result dict, then re-enable token
-                    # streaming for the next agent step (which is the final answer).
+                    # The tools node just finished. Buffer tool_result dicts keyed by
+                    # tool_call_id so postprocess_schema can override content before
+                    # they are emitted.
                     suppress_agent_tokens = False
                     for tool_msg in data["tools"]["messages"]:
                         pending = pending_tool_calls.pop(tool_msg.tool_call_id, {})
-                        yield {
+                        buffered_tool_results[tool_msg.tool_call_id] = {
                             "type": "tool_result",
                             "id": tool_msg.tool_call_id,
                             "name": pending.get("name", getattr(tool_msg, "name", "")),
                             "args": pending.get("args", {}),
                             "result": tool_msg.content,
                         }
+
+                elif "postprocess_schema" in data:
+                    # Apply any content overrides produced by the postprocessor, then
+                    # flush the buffer. This ensures OpenWebUI receives the compact
+                    # Markdown rather than the raw JSON.
+                    for msg in (data["postprocess_schema"] or {}).get("messages", []):
+                        if msg.tool_call_id in buffered_tool_results:
+                            buffered_tool_results[msg.tool_call_id]["result"] = msg.content
+                    for item in buffered_tool_results.values():
+                        yield item
+                    buffered_tool_results = {}
 
             # ── Token-streaming events ──────────────────────────────────────────
             elif part["type"] == "messages":

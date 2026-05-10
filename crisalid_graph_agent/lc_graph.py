@@ -3,7 +3,7 @@ import re
 import uuid
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import StateGraph
 from langgraph.graph.message import MessagesState
@@ -11,6 +11,11 @@ from langgraph.prebuilt import ToolNode
 
 from common.llm import build_chat_model
 from crisalid_graph_agent.mcp_toolbox_client import MCPToolboxClient
+from crisalid_graph_agent.schema_postprocessor import compact_schema
+
+# Must match the tool name as registered by the MCP toolbox server.
+# Check the printed tool list on startup if the name needs adjustment.
+_SCHEMA_TOOL_NAME = "get-crisalid-schema"
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
@@ -106,12 +111,28 @@ class MCPToolboxGraphFactory:
                 return "tools"
             return "__end__"
 
+        async def postprocess_schema(state: MessagesState):
+            updated = []
+            for msg in state["messages"]:
+                if isinstance(msg, ToolMessage) and getattr(msg, "name", None) == _SCHEMA_TOOL_NAME:
+                    try:
+                        compact = compact_schema(msg.content)
+                        updated.append(
+                            ToolMessage(content=compact, tool_call_id=msg.tool_call_id,
+                                        name=msg.name, id=msg.id)
+                        )
+                    except Exception:
+                        pass
+            return {"messages": updated} if updated else {}
+
         graph = StateGraph(MessagesState)
         graph.add_node("agent", call_model)
         graph.add_node("tools", tool_node)
+        graph.add_node("postprocess_schema", postprocess_schema)
         graph.set_entry_point("agent")
         graph.add_conditional_edges("agent", should_continue)
-        graph.add_edge("tools", "agent")
+        graph.add_edge("tools", "postprocess_schema")
+        graph.add_edge("postprocess_schema", "agent")
 
         return graph.compile()
 
