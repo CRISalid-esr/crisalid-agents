@@ -64,6 +64,10 @@ The pipelines server runs on `http://localhost:9099` and is treated by OpenWebUI
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | Neo4j connection |
 | `CRISALID_MCP_TOOLBOX_URL` | MCP Toolbox server URL |
 | `CRISALID_MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox |
+| `KEYCLOAK_ISSUER` | Keycloak issuer URL (e.g. `https://keycloak.example.com/realms/my-realm`); omit to disable auth |
+| `KEYCLOAK_CLIENT_ID` | Service account client ID |
+| `KEYCLOAK_CLIENT_SECRET` | Service account client secret |
+| `KEYCLOAK_SSL_VERIFY` | Set to `false` to skip TLS verification (local dev with self-signed certs) |
 
 ## Conventions
 
