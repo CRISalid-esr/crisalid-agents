@@ -89,7 +89,7 @@ The resulting layout should be similar to:
 ├── pyproject.toml
 └── scripts
 ```
- to th
+
 Create and fill in the .env file by copying the .env.sample.
 
 ## Running the agent as an OpenWebUI Pipeline
