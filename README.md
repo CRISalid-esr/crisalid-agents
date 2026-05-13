@@ -89,16 +89,12 @@ The resulting layout should be similar to:
 ├── pyproject.toml
 └── scripts
 ```
+ to th
+Create and fill in the .env file by copying the .env.sample.
 
 ## Running the agent as an OpenWebUI Pipeline
 
-OpenWebUI itself can be launched separately, for example:
-
-```bash
-DATA_DIR=~/.open-webui uvx --python 3.11 open-webui@latest serve
-```
-
-Then run the Pipelines server from the cloned Pipelines directory:
+1) Run the Pipelines server from the cloned Pipelines directory:
 
 ```bash
 cd .openwebui-pipelines/
@@ -117,7 +113,24 @@ The Pipelines server should start on:
 http://localhost:9099
 ```
 
-In OpenWebUI, add an OpenAI-compatible connection pointing to:
+
+**WARNING**
+
+Should the initial start fail in importing a pipeline, said pipeline will be moved to a folder called "failed" in the folder "openwebui_pipelines". The pipeline will then not be loaded again until moved again out of "failed" and in the "openwebui_pipelines" folder.
+
+
+2) Then OpenWebUI itself should be launched separately in another terminal :
+
+```bash
+DATA_DIR=~/.open-webui uvx --python 3.11 open-webui@latest serve
+```
+It can be accessed at:
+
+```text
+http://localhost:8080
+```
+
+3) In OpenWebUI, add an OpenAI-compatible connection pointing to:
 
 ```text
 http://localhost:9099
