@@ -1,0 +1,10 @@
+.env
+.git
+.openwebui-pipelines/
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+scripts/
+tests/
+*.md
