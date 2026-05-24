@@ -67,7 +67,9 @@ class CrisalidGraphAgent:
                     for tc in getattr(msg, "tool_calls", []):
                         pending_tool_calls[tc["id"]] = {
                             "name": tc["name"],
-                            "args": tc.get("args", {}),
+                            # Strip embedding vectors (_vector suffix) — they are 1 024-float arrays
+                            # injected by _embed_semantic_params and must not be forwarded to the UI.
+                            "args": {k: v for k, v in tc.get("args", {}).items() if not k.endswith("_vector")},
                         }
 
                 elif "tools" in data:

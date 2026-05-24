@@ -3,8 +3,14 @@ import time
 from typing import Callable
 
 import httpx
+import toolbox_core.protocol as _tc_protocol
 from toolbox_core.protocol import Protocol
 from toolbox_langchain import ToolboxClient
+
+# The toolbox server serialises float parameters as JSON Schema "number", but the
+# client's type map only contains "float".  Add the alias so float array parameters
+# (e.g. embedding vectors) load without a ValueError at toolset parse time.
+_tc_protocol.__TYPE_MAP["number"] = float  # type: ignore[attr-defined]
 
 
 class MCPToolboxClient:
@@ -77,6 +83,8 @@ class MCPToolboxClient:
 
         self._tools = await self._client.aload_toolset(self.toolset_name, **kwargs)
 
+        self._validate_semantic_params(self._tools)
+
         print(
             f"Loaded {len(self._tools)} Toolbox tool(s) "
             f"from toolset {self.toolset_name!r}: "
@@ -84,6 +92,28 @@ class MCPToolboxClient:
         )
 
         return self._tools
+
+    @staticmethod
+    def _validate_semantic_params(tools) -> None:
+        # Convention: any semantic_xxx parameter carries a natural-language string supplied
+        # by the LLM. Before the tool is called, _embed_semantic_params replaces it with an
+        # embedding vector stored in the paired semantic_xxx_vector field. Both fields must
+        # be declared in the tool definition for this substitution to work — fail fast here
+        # rather than silently pass a raw string to a Neo4j vector index at query time.
+        for tool in tools:
+            schema = getattr(tool, "args_schema", None)
+            if schema is None:
+                continue
+            fields = set(schema.model_fields)
+            for name in fields:
+                if name.startswith("semantic_") and not name.endswith("_vector"):
+                    vector_field = f"{name}_vector"
+                    if vector_field not in fields:
+                        raise ValueError(
+                            f"Tool '{tool.name}': parameter '{name}' has no corresponding "
+                            f"'{vector_field}' field. Add '{vector_field}' (array of floats) "
+                            f"to the tool definition."
+                        )
 
     async def aclose(self):
         if self._client is not None:
