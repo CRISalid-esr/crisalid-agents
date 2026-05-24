@@ -7,6 +7,7 @@ from typing import Iterator, Union
 # Entities like &lt; expand further under json.dumps, so truncate early to stay well
 # under OpenWebUI's 131 072-byte SSE line limit.
 # https://github.com/NousResearch/hermes-agent/issues/18021
+_MAX_FIELD_CHARS = 600
 _MAX_TOOL_RESULT_CHARS = 20_000
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -31,10 +32,24 @@ def to_langchain_messages(messages: list[dict]) -> list[BaseMessage]:
     return result
 
 
+def _truncate_fields(obj):
+    if isinstance(obj, str):
+        return obj[:_MAX_FIELD_CHARS] + "…" if len(obj) > _MAX_FIELD_CHARS else obj
+    if isinstance(obj, dict):
+        return {k: _truncate_fields(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_truncate_fields(item) for item in obj]
+    return obj
+
+
 def _tool_result_block(item: dict) -> str:
     result = item["result"]
     if not isinstance(result, str):
         result = json.dumps(result, ensure_ascii=False)
+    try:
+        result = json.dumps(_truncate_fields(json.loads(result)), ensure_ascii=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
     if len(result) > _MAX_TOOL_RESULT_CHARS:
         result = result[:_MAX_TOOL_RESULT_CHARS] + f"\n… [truncated — {len(result)} chars total]"
     return (
@@ -56,11 +71,11 @@ class Pipeline:
         await self.agent.aclose()
 
     def pipe(
-        self,
-        user_message: str,
-        model_id: str,
-        messages: list[dict],
-        body: dict,
+            self,
+            user_message: str,
+            model_id: str,
+            messages: list[dict],
+            body: dict,
     ) -> Union[str, Generator, Iterator]:
         langchain_messages = to_langchain_messages(messages)
 
@@ -75,16 +90,21 @@ class Pipeline:
                 # First token of the final answer: close the spinner that was opened
                 # after the last tool result, then stream the token normally.
                 if pending_status:
-                    yield {"event": {"type": "status", "data": {"description": "Thinking…", "done": True}}}
+                    yield {"event": {"type": "status",
+                                     "data": {"description": "Thinking…", "done": True}}}
                     pending_status = False
-                yield {"choices": [{"delta": {"content": item}, "finish_reason": None}]}
+                yield {"choices": [{"delta": {"content":item}, "finish_reason": None}]}
 
             elif isinstance(item, dict) and item.get("type") == "tool_result":
                 # Render the tool execution as an expandable <details> block, then
                 # immediately re-open the spinner so the user knows processing continues
                 # while the model digests the tool result.
-                yield _tool_result_block(item)
-                yield {"event": {"type": "status", "data": {"description": "Thinking…", "done": False}}}
+                # add  "\n\n" to avoid https://github.com/open-webui/open-webui/issues/24634
+                yield {"choices": [{"delta": {"content":  "\n\n" + _tool_result_block(item)},
+                                    "finish_reason": None}]}
+                #yield  "\n\n" + _tool_result_block(item)
+                yield {"event": {"type": "status",
+                                 "data": {"description": "Thinking…", "done": False}}}
                 pending_status = True
 
         yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}

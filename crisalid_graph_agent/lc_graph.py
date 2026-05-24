@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import MessagesState
 from langgraph.prebuilt import ToolNode
 
+from common.embedding import EmbeddingServiceError, get_embedding_provider
 from common.llm import build_chat_model
 from crisalid_graph_agent.mcp_toolbox_client import MCPToolboxClient
 from crisalid_graph_agent.schema_postprocessor import compact_schema
@@ -20,11 +21,15 @@ _SCHEMA_TOOL_NAME = "get-crisalid-schema"
 _PROMPT_DIR = Path(__file__).resolve().parent
 
 _TOOLSET_PROMPTS: dict[str, str] = {
-    "crisalid-restricted": "mcp_toolbox_restricted_prompt.txt",
-    "crisalid-unrestricted": "mcp_toolbox_unrestricted_prompt.txt",
+    "crisalid-restricted": "mcp_toolbox_restricted_prompt.md",
+    "crisalid-unrestricted": "mcp_toolbox_unrestricted_prompt.md",
 }
 
 
+# Workaround for mistral-medium-250523 served via vLLM without --tool-call-parser:
+# the model emits tool calls as raw text prefixed with [TOOL_CALLS] instead of using
+# the structured tool-call protocol. Does not apply to Mistral 4+ — removal planned
+# once mistral-medium-250523 is retired from production.
 def _parse_raw_tool_calls(content: str) -> list[dict] | None:
     if not content.startswith("[TOOL_CALLS]"):
         return None
@@ -77,6 +82,49 @@ def _fix_raw_tool_calls(message: AIMessage) -> AIMessage:
     return AIMessage(content="", tool_calls=tool_calls)
 
 
+def _strip_vector_args(messages):
+    result = []
+    for msg in messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            cleaned = [
+                {**tc, "args": {k: v for k, v in tc["args"].items() if not k.endswith("_vector")}}
+                for tc in msg.tool_calls
+            ]
+            result.append(AIMessage(content=msg.content, tool_calls=cleaned))
+        else:
+            result.append(msg)
+    return result
+
+
+async def _embed_semantic_params(message: AIMessage) -> AIMessage:
+    if not message.tool_calls:
+        return message
+
+    needs_embedding = any(
+        any(k.startswith("semantic_") and not k.endswith("_vector") and isinstance(v, str)
+            for k, v in tc["args"].items())
+        for tc in message.tool_calls
+    )
+    if not needs_embedding:
+        return message
+
+    try:
+        provider = get_embedding_provider()
+        new_tool_calls = []
+        for tc in message.tool_calls:
+            new_args = dict(tc["args"])
+            for key, value in list(tc["args"].items()):
+                if key.startswith("semantic_") and not key.endswith("_vector") and isinstance(value, str):
+                    new_args[f"{key}_vector"] = await provider.embed_text(value)
+            new_tool_calls.append({**tc, "args": new_args})
+        return AIMessage(content=message.content, tool_calls=new_tool_calls)
+    except EmbeddingServiceError as exc:
+        return AIMessage(
+            content=f"Error: the embedding service is currently unavailable ({exc}). Please try again later.",
+            tool_calls=[],
+        )
+
+
 class MCPToolboxGraphFactory:
     def __init__(self):
         self.toolbox_client = MCPToolboxClient()
@@ -94,11 +142,14 @@ class MCPToolboxGraphFactory:
                 stop_after_attempt=3,
             )
             | RunnableLambda(_fix_raw_tool_calls)
+            | RunnableLambda(_embed_semantic_params)
         )
         tool_node = ToolNode(tools)
 
         async def call_model(state: MessagesState):
-            messages = [SystemMessage(content=system_prompt)] + state["messages"]
+            messages = _strip_vector_args(
+                [SystemMessage(content=system_prompt)] + state["messages"]
+            )
             try:
                 return {"messages": [await llm_with_tools.ainvoke(messages)]}
             except ValueError:
