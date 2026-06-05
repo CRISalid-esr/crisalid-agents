@@ -119,15 +119,50 @@ http://localhost:9099
 Should the initial start fail in importing a pipeline, said pipeline will be moved to a folder called "failed" in the folder "openwebui_pipelines". The pipeline will then not be loaded again until moved again out of "failed" and in the "openwebui_pipelines" folder.
 
 
-2) Then OpenWebUI itself should be launched separately in another terminal :
+2) Then OpenWebUI itself should be launched separately in another terminal.
+
+### Without Keycloak authentication
 
 ```bash
-DATA_DIR=~/.open-webui uvx --python 3.11 open-webui@latest serve
+DATA_DIR=~/.open-webui uvx --python 3.11 open-webui@0.9.5 serve --port 8081
 ```
+
 It can be accessed at:
 
 ```text
-http://localhost:8080
+http://localhost:8081
+```
+
+### With Keycloak authentication
+
+See the [OpenWebUI Keycloak SSO documentation](https://docs.openwebui.com/features/authentication-access/auth/sso/keycloak/) for the full configuration reference.
+
+When Keycloak uses a self-signed or locally-trusted certificate (e.g. via `mkcert`), build a CA bundle that includes both the system CAs and the local root CA, then pass it to OpenWebUI via the standard SSL env vars:
+
+```bash
+CAROOT="$(mkcert -CAROOT)"
+cat /etc/ssl/certs/ca-certificates.crt "$CAROOT/rootCA.pem" > ~/.open-webui/ca-bundle.pem
+```
+
+Then start OpenWebUI with the Keycloak OIDC parameters:
+
+```bash
+SSL_CERT_FILE=~/.open-webui/ca-bundle.pem \
+REQUESTS_CA_BUNDLE=~/.open-webui/ca-bundle.pem \
+DATA_DIR=~/.open-webui \
+ENABLE_OAUTH_SIGNUP=true \
+OAUTH_CLIENT_ID=<client-id> \
+OAUTH_CLIENT_SECRET=<client-secret> \
+OPENID_PROVIDER_URL=https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration \
+OAUTH_PROVIDER_NAME=Keycloak \
+OPENID_REDIRECT_URI=http://localhost:8081/oauth/oidc/callback \
+uvx --python 3.11 open-webui@0.9.5 serve --port 8081
+```
+
+It can be accessed at:
+
+```text
+http://localhost:8081
 ```
 
 3) In OpenWebUI, add an OpenAI-compatible connection pointing to:
