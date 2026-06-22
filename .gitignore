@@ -2,3 +2,6 @@
 .openwebui-pipelines
 openwebui_pipelines/**/valves.json
 .idea
+.webui_secret_key
+__pycache__/
+*.pyc
