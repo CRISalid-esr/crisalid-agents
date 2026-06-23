@@ -15,7 +15,11 @@ _DB_AGENT_PROMPT = (_PROMPT_DIR / "db_query_system.md").read_text(encoding="utf-
 
 
 def build_db_query_nodes(llm: BaseChatModel, tools: List[BaseTool]) -> Tuple:
-    """Return (db_agent_node, db_tools_node, should_continue) for lc_graph.py."""
+    """Return (db_agent_node, db_tools_node, should_continue) for lc_graph.py.
+
+    `tools` is the full `crisalid-sorbobot` MCP toolset (curated CRISalid
+    tools plus `execute-cypher-readonly`), loaded by `McpToolboxClient`.
+    """
     llm_with_tools = llm.bind_tools(tools)
 
     async def db_agent(state: MessagesState):

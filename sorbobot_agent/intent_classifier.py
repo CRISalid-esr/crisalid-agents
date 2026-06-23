@@ -225,9 +225,6 @@ async def classify_intent(llm: BaseChatModel, query: str) -> dict:
 
     logger.info(
         "classify_intent: query=%r -> intent=%s keywords=%s person=%s",
-        query,
-        intent,
-        keywords,
-        person_name,
+        query, intent, keywords, person_name,
     )
     return {"intent": intent, "keywords": keywords, "person_name": person_name}

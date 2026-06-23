@@ -1,4 +1,4 @@
-"""Diagnostic logging setup for sorbobot-agent."""
+
 
 import logging
 import sys

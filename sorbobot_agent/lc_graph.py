@@ -68,7 +68,7 @@ class SorboBotGraphFactory:
             query = state["query"]
             person_name = state.get("person_name") or query
             answer = await handlers.handle_person_expertise(
-                toolbox, llm, config, person_name, query, state["language"]
+                toolbox, person_name, query, state["language"]
             )
             return {"messages": [AIMessage(content=answer)]}
 

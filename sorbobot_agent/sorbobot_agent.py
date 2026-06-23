@@ -21,11 +21,7 @@ _MAX_LOGGED_RESULT_CHARS = 500
 
 
 def _truncate(text: str, max_chars: int = _MAX_LOGGED_RESULT_CHARS) -> str:
-    return (
-        text
-        if len(text) <= max_chars
-        else text[:max_chars] + f"… [{len(text)} chars total]"
-    )
+    return text if len(text) <= max_chars else text[:max_chars] + f"… [{len(text)} chars total]"
 
 
 def _refusal_message(query: str) -> AIMessage:

@@ -1,3 +1,9 @@
+"""Async domain-search, judging and author-lookup helpers for the SorboBot agent.
+
+These are plain async functions called directly by handlers.py — not
+LangChain `@tool`s — since they are never exposed to LLM tool-calling.
+"""
+
 import json
 import logging
 import re
@@ -34,6 +40,10 @@ def format_domain_path(full_path: str) -> str:
     return " > ".join(parts[-3:]) if parts else full_path
 
 
+# Domain.type values (domain/field/subfield/topic — set by
+# scripts/rebuild_domain_graph.py) -> display label. Every OpenAlex level
+# shares the same :Domain label and HAS_CONCEPT relationship, so this is the
+# only place that tells a user-facing result apart from another.
 _TYPE_LABELS = {
     "domain": "Domain",
     "field": "Field",
@@ -58,22 +68,17 @@ async def search_domains(
     """Find candidate Domain nodes for `keyword`.
 
     Calls crisalid-taxi's POST /api/v1/match to semantically match `keyword`
-    against the OpenAlex taxonomy.
+    against the OpenAlex taxonomy
     """
     logger.info(
         "crisalid-taxi request: POST %s/api/v1/match/ keyword=%r threshold=%.2f",
-        taxi_url,
-        keyword,
-        threshold,
+        taxi_url, keyword, threshold,
     )
     async with httpx.AsyncClient(base_url=taxi_url, timeout=15.0) as client:
 
         response = await client.post(
             "/api/v1/match/",
-            json={
-                "inputs": [{"id": "query", "text": keyword}],
-                "similarity_threshold": threshold,
-            },
+            json={"inputs": [{"id": "query", "text": keyword}], "similarity_threshold": threshold},
         )
         response.raise_for_status()
         payload = response.json()
@@ -90,10 +95,7 @@ async def search_domains(
     }
     logger.info(
         "search_domains: %d/%d match(es) kept after min_depth=%d filter (keyword=%r)",
-        len(candidate_uids),
-        len(matches),
-        min_depth,
-        keyword,
+        len(candidate_uids), len(matches), min_depth, keyword,
     )
 
     if not candidate_uids:
@@ -110,8 +112,7 @@ async def search_domains(
     )
     logger.info(
         "search_domains: get-domains-by-uid -> %d domain(s) (keyword=%r)",
-        len(domains),
-        keyword,
+        len(domains), keyword,
     )
 
     return domains[:limit]
@@ -157,9 +158,7 @@ def _fmt_domain_for_llm(d: dict) -> str:
     path_str = format_domain_path(full_path) if full_path else d.get("name", "?")
     type_label = format_type_label(d.get("type"))
     desc = d.get("description") or ""
-    base = (
-        f"- Name: {d.get('name', '?')} | Type: {type_label or '?'} | Path: {path_str}"
-    )
+    base = f"- Name: {d.get('name', '?')} | Type: {type_label or '?'} | Path: {path_str}"
     return f"{base} | Description: {desc}" if desc else base
 
 
@@ -265,7 +264,8 @@ async def get_domain_authors(
     author_min: int = 10,
     author_max: int = 20,
 ) -> List[dict]:
-    """Internal Sorbonne researchers for the given domains, via adaptive tree search."""
+    """Internal Sorbonne researchers for the given domains, via adaptive tree search.
+    """
     final_paths, authors_data = await _adaptive_tree_search(
         toolbox,
         initial_paths=domain_paths,
@@ -348,11 +348,7 @@ async def _adaptive_tree_search(
         nb_authors = len({a["person_uid"] for a in authors})
         logger.info(
             "_adaptive_tree_search[%d]: %d author(s) for paths=%s (target=%d-%d)",
-            iteration,
-            nb_authors,
-            current_paths,
-            target_authors_min,
-            target_authors_max,
+            iteration, nb_authors, current_paths, target_authors_min, target_authors_max,
         )
 
         if target_authors_min <= nb_authors <= target_authors_max:
@@ -372,8 +368,7 @@ async def _adaptive_tree_search(
             new_paths = list(set(new_paths))
             logger.info(
                 "_adaptive_tree_search[%d]: too many — narrowing to %s",
-                iteration,
-                new_paths,
+                iteration, new_paths,
             )
         else:
             # Too few -> go up to parents
@@ -389,8 +384,7 @@ async def _adaptive_tree_search(
             new_paths = list(set(new_paths))
             logger.info(
                 "_adaptive_tree_search[%d]: too few — broadening to %s",
-                iteration,
-                new_paths,
+                iteration, new_paths,
             )
 
         if set(new_paths) == set(current_paths):
@@ -410,8 +404,7 @@ async def _adaptive_tree_search(
     )
     logger.info(
         "_adaptive_tree_search: max_iterations reached — %d author(s) for paths=%s",
-        len({a["person_uid"] for a in authors}),
-        current_paths,
+        len({a["person_uid"] for a in authors}), current_paths,
     )
     return current_paths, authors
 
@@ -422,7 +415,8 @@ _PERSON_FUZZY_MATCH_THRESHOLD = 0.6
 
 
 async def get_person_expertise(toolbox: McpToolboxClient, name: str) -> List[dict]:
-    """Top research domains for a named internal Sorbonne researcher."""
+    """Top research domains for a named internal Sorbonne researcher.
+    """
     candidates = await toolbox.call(
         "search-person-by-name-fuzzy", name=name, max_results=50
     )
@@ -442,14 +436,10 @@ async def get_person_expertise(toolbox: McpToolboxClient, name: str) -> List[dic
     best_score = SequenceMatcher(None, name_lower, best["display_name"].lower()).ratio()
     logger.info(
         "get_person_expertise: best match=%r score=%.2f (threshold=%.2f)",
-        best["display_name"],
-        best_score,
-        _PERSON_FUZZY_MATCH_THRESHOLD,
+        best["display_name"], best_score, _PERSON_FUZZY_MATCH_THRESHOLD,
     )
     if best_score < _PERSON_FUZZY_MATCH_THRESHOLD:
-        logger.info(
-            "get_person_expertise: best match below threshold — returning empty"
-        )
+        logger.info("get_person_expertise: best match below threshold — returning empty")
         return []
 
     return await toolbox.call("list-person-research-domains", person_uid=best["uid"])

@@ -1,4 +1,7 @@
-"""Async wrapper around the crisalid-ai-skills MCP toolbox client."""
+"""Async wrapper around the crisalid-ai-skills MCP toolbox client.
+
+Loads the `crisalid-sorbobot` MCP toolset and provides a simple `call(tool_name, **kwargs)` method to invoke tools by name.
+"""
 
 import json
 import logging

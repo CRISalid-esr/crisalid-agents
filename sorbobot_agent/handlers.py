@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -104,7 +105,11 @@ def _format_domain_experts_text(
 
 async def _search_domains_safe(
     toolbox: McpToolboxClient, kw: str, config: AppConfig
-) -> list:
+) -> Optional[list]:
+    """Returns `None` (not `[]`) when crisalid-taxi itself is unreachable/timed
+    out, so callers can tell "search service down" apart from "no match" —
+    the two have very different user-facing messages and root causes.
+    """
     try:
         return await domain_tools.search_domains(
             toolbox,
@@ -113,6 +118,9 @@ async def _search_domains_safe(
             limit=config.validation.top_k_syntactic,
             taxi_url=config.crisalid_taxi.base_url,
         )
+    except httpx.HTTPError:
+        logger.error("Domain search unavailable for '%s' (crisalid-taxi unreachable or timed out)", kw, exc_info=True)
+        return None
     except Exception:
         logger.error("Domain search failed for '%s'", kw, exc_info=True)
         return []
@@ -136,15 +144,28 @@ async def handle_domain_experts(
         *(_search_domains_safe(toolbox, kw, config) for kw in kw_list)
     )
 
+    search_unavailable = any(r is None for r in results)
     all_domains: list = []
     seen_paths: set = set()
     for domains in results:
+        if domains is None:
+            continue
         for d in domains:
             if d.get("full_path") not in seen_paths:
                 seen_paths.add(d["full_path"])
                 all_domains.append(d)
 
     if not all_domains:
+        if search_unavailable:
+            logger.warning(
+                "handle_domain_experts: crisalid-taxi unavailable for keywords=%s — returning service-unavailable message",
+                kw_list,
+            )
+            return (
+                "Le service de recherche sémantique est temporairement indisponible. Réessayez dans quelques instants."
+                if language == "fr"
+                else "The semantic search service is temporarily unavailable. Please try again shortly."
+            )
         logger.info(
             "handle_domain_experts: no domain found for keywords=%s — returning empty-result message",
             kw_list,
@@ -205,6 +226,7 @@ async def handle_domain_experts(
     )[:show_max_authors]
 
     # Rebuild domain results from the actual paths used by authors
+    # (adaptive search may have switched to parent domains → collect real paths from articles)
     actual_paths: dict = {}  # path → {name, type, count}
     for a in authors_data:
         for art in a.get("sample_articles", []):
@@ -214,11 +236,7 @@ async def handle_domain_experts(
             if path not in actual_paths:
                 parts = [p for p in path.split("/-") if p and p.lower() != "root"]
                 name = parts[-1].replace("-", " ").title() if parts else path
-                actual_paths[path] = {
-                    "name": name,
-                    "type": art.get("type", ""),
-                    "count": 0,
-                }
+                actual_paths[path] = {"name": name, "type": art.get("type", ""), "count": 0}
             actual_paths[path]["count"] += 1
 
     if actual_paths:
@@ -257,9 +275,7 @@ async def handle_domain_experts(
 
     logger.info(
         "handle_domain_experts: returning %d domain(s), %d author(s) for keywords=%s",
-        len(domain_results),
-        len(authors_data),
-        kw_list,
+        len(domain_results), len(authors_data), kw_list,
     )
     return _format_domain_experts_text(
         keywords, domain_results, authors_data, language, show_max_authors
@@ -268,8 +284,6 @@ async def handle_domain_experts(
 
 async def handle_person_expertise(
     toolbox: McpToolboxClient,
-    llm: BaseChatModel,
-    config: AppConfig,
     person_name: str,
     query: str,
     language: str,
@@ -292,29 +306,6 @@ async def handle_person_expertise(
             else f"No Sorbonne researcher found for '{person_name}'."
         )
 
-    # Judge: filter the person's domains against the user query
-    try:
-        domain_objs = [
-            {"name": r.get("domain_name", ""), "full_path": r.get("domain_path", "")}
-            for r in rows
-            if r.get("domain_path")
-        ]
-        if domain_objs:
-            qualified = await domain_tools.judge_domains(
-                llm,
-                [],
-                domain_objs,
-                query,
-                threshold=config.validation.judge_threshold,
-            )
-            qualified_paths = {d["full_path"] for d in qualified}
-            rows = [
-                r for r in rows if r.get("domain_path", "") in qualified_paths
-            ] or rows
-    except Exception:
-        logger.error(
-            "Judge failed for person expertise — keeping all domains", exc_info=True
-        )
 
     resolved_name = rows[0].get("display_name", person_name) if rows else person_name
     fr = language == "fr"
