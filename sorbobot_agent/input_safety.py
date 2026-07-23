@@ -1,3 +1,10 @@
+"""Input sanitization — detects prompt injection and dangerous inputs.
+
+No external dependencies beyond the stdlib: n-gram overlap and
+difflib.SequenceMatcher are sufficient to catch near-matches of known
+attack strings without pulling in fuzzywuzzy or scikit-learn.
+"""
+
 import math
 import re
 from collections import Counter

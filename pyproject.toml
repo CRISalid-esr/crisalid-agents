@@ -13,6 +13,11 @@ dependencies = [
     "langgraph>=1.1.10",
     "toolbox-langchain>=1.0.0",
     "toolbox-core @ git+https://github.com/googleapis/mcp-toolbox-sdk-python.git#subdirectory=packages/toolbox-core",
+    "uvicorn>=0.51.0",
+    "dotenv>=0.9.9",
+    "fastapi>=0.139.0",
+    "passlib>=1.7.4",
+    "jwt>=1.4.0",
 ]
 
 [dependency-groups]

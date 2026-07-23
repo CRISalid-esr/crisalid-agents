@@ -1,3 +1,11 @@
+"""Manual ReAct nodes for the database_query intent — full crisalid-sorbobot toolset.
+
+Mirrors the crisalid-agents convention: StateGraph + ToolNode built by hand,
+no create_react_agent. The returned node/tool-node pair is wired into the main
+graph in lc_graph.py as the "db_agent" / "db_tools" nodes, so that token
+streaming (filtered by `metadata["langgraph_node"]`) sees them at the top level.
+"""
+
 import logging
 from pathlib import Path
 from typing import List, Tuple

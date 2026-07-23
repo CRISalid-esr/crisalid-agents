@@ -1,4 +1,10 @@
+"""Diagnostic logging setup for sorbobot-agent.
 
+Always attaches a console handler to the "sorbobot_agent" logger hierarchy
+(all module loggers are named "sorbobot_agent.<module>", so they inherit it).
+When LoggingConfig.log_to_file is set, also writes a daily log file under
+log_dir (default: <project root>/logs), named sorbobot-YYYY-MM-DD.log.
+"""
 
 import logging
 import sys

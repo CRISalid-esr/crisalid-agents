@@ -1,3 +1,9 @@
+"""Async intent handlers — domain_experts, person_expertise, general_question.
+
+Each handler returns the final answer text (str) directly: OpenWebUI is a
+purely conversational frontend, there is no structured JSON response to build.
+"""
+
 import asyncio
 import logging
 from typing import List, Optional
@@ -8,8 +14,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from sorbobot_agent import domain_tools
 from sorbobot_agent.config import AppConfig
-from sorbobot_agent.domain_tools import format_domain_path as _fmt_path
-from sorbobot_agent.domain_tools import format_type_label
 from sorbobot_agent.mcp_toolbox import McpToolboxClient
 
 logger = logging.getLogger("sorbobot_agent.handlers")
@@ -26,27 +30,22 @@ def _format_domain_experts_text(
     max_pubs = max((a.get("nb_publications", 0) for a in authors_data), default=1) or 1
     fr = language == "fr"
 
-    # Build path → "#N" mapping from the displayed domain list
-    path_to_id: dict = {
-        d.get("full_path", ""): f"#{i}"
+    # Build uid → "#N" mapping from the displayed domain list
+    uid_to_id: dict = {
+        d.get("uid", ""): f"#{i}"
         for i, d in enumerate(qualified, 1)
-        if d.get("full_path")
+        if d.get("uid")
     }
 
     def _author_domain_ids(author: dict) -> str:
-        """Return space-separated domain IDs for an author based on article paths."""
+        """Return space-separated domain IDs for an author based on article domain_uid."""
         ids: set = set()
         for art in author.get("sample_articles", []):
             if not isinstance(art, dict):
                 continue
-            art_path = art.get("path", "")
-            if art_path in path_to_id:
-                ids.add(path_to_id[art_path])
-            else:
-                # Partial match: article path is a child or parent of a displayed domain
-                for dp, did in path_to_id.items():
-                    if art_path.startswith(dp + "/-") or dp.startswith(art_path + "/-"):
-                        ids.add(did)
+            art_uid = art.get("domain_uid", "")
+            if art_uid in uid_to_id:
+                ids.add(uid_to_id[art_uid])
         return " ".join(sorted(ids, key=lambda x: int(x.replace("#", ""))))
 
     lines: list = []
@@ -60,11 +59,9 @@ def _format_domain_experts_text(
                 "Voici la liste des domaines les plus importants (nombre d'articles dans ce domaine) :"
             )
             for i, d in enumerate(qualified, 1):
-                path = _fmt_path(d.get("full_path", "")) or d.get("name", "")
+                label = d.get("hierarchy_label") or d.get("name", "")
                 nb = d.get("nb_articles", d.get("nb_docs", 0))
-                type_label = format_type_label(d.get("type"))
-                prefix = f"[{type_label}] " if type_label else ""
-                lines.append(f"#{i} {prefix}{path} ({nb} art.)")
+                lines.append(f"#{i} {label} ({nb} art.)")
         if authors_data:
             lines.append("\nVoici les chercheurs les plus pertinents :\n")
             for a in authors_data:
@@ -79,11 +76,9 @@ def _format_domain_experts_text(
         if qualified:
             lines.append("Most relevant domains (article count per domain):")
             for i, d in enumerate(qualified, 1):
-                path = _fmt_path(d.get("full_path", "")) or d.get("name", "")
+                label = d.get("hierarchy_label") or d.get("name", "")
                 nb = d.get("nb_articles", d.get("nb_docs", 0))
-                type_label = format_type_label(d.get("type"))
-                prefix = f"[{type_label}] " if type_label else ""
-                lines.append(f"#{i} {prefix}{path} ({nb} art.)")
+                lines.append(f"#{i} {label} ({nb} art.)")
         if authors_data:
             lines.append("\nMost relevant researchers:\n")
             for a in authors_data:
@@ -146,13 +141,13 @@ async def handle_domain_experts(
 
     search_unavailable = any(r is None for r in results)
     all_domains: list = []
-    seen_paths: set = set()
+    seen_uids: set = set()
     for domains in results:
         if domains is None:
             continue
         for d in domains:
-            if d.get("full_path") not in seen_paths:
-                seen_paths.add(d["full_path"])
+            if d.get("uid") not in seen_uids:
+                seen_uids.add(d["uid"])
                 all_domains.append(d)
 
     if not all_domains:
@@ -176,13 +171,17 @@ async def handle_domain_experts(
             else f"No domains found for: {kw_str}."
         )
 
-    # Judge: LLM scores domains against the user's query.
+    # Judge: LLM scores domains against the user's query. Skipped when there's
+    # a single candidate — the threshold logic always keeps the top scorer
+    # anyway, so judging one domain can't change the outcome.
     if len(all_domains) <= 1:
         logger.info("handle_domain_experts: judge skipped (single candidate domain)")
         qualified = [
             {
+                "uid": d.get("uid"),
                 "name": d.get("name"),
-                "full_path": d.get("full_path"),
+                "hierarchy": d.get("hierarchy", []),
+                "hierarchy_label": d.get("hierarchy_label"),
                 "type": d.get("type"),
                 "score": 1.0,
             }
@@ -204,14 +203,13 @@ async def handle_domain_experts(
     if not qualified:
         qualified = all_domains[:5]
 
-    # Authors via adaptive tree search
-    paths = [d["full_path"] for d in qualified]
+    # Authors — broadens to the parent SubField if the matched Topics cover
+    # too few documents (see domain_tools._resolve_search_scope).
     try:
         authors_data = await domain_tools.get_domain_authors(
             toolbox,
-            paths,
-            author_min=config.validation.author_min,
-            author_max=config.validation.author_max,
+            qualified,
+            min_docs=config.validation.domain_min_docs,
         )
     except Exception:
         logger.error("Author search failed", exc_info=True)
@@ -225,38 +223,45 @@ async def handle_domain_experts(
         authors_data, key=lambda a: a.get("nb_publications", 0), reverse=True
     )[:show_max_authors]
 
-    # Rebuild domain results from the actual paths used by authors
-    # (adaptive search may have switched to parent domains → collect real paths from articles)
-    actual_paths: dict = {}  # path → {name, type, count}
+    # Rebuild domain results from the actual domains used by authors'
+    # articles (adaptive search may have switched to parent/child domains —
+    # collect the real uids from articles rather than trusting `qualified`).
+    actual_uids: dict = {}  # uid → {name, type, count}
     for a in authors_data:
         for art in a.get("sample_articles", []):
-            path = art.get("path", "")
-            if not path:
+            uid = art.get("domain_uid", "")
+            if not uid:
                 continue
-            if path not in actual_paths:
-                parts = [p for p in path.split("/-") if p and p.lower() != "root"]
-                name = parts[-1].replace("-", " ").title() if parts else path
-                actual_paths[path] = {"name": name, "type": art.get("type", ""), "count": 0}
-            actual_paths[path]["count"] += 1
+            if uid not in actual_uids:
+                actual_uids[uid] = {
+                    "name": art.get("domain_name") or uid,
+                    "type": art.get("type", ""),
+                    "count": 0,
+                }
+            actual_uids[uid]["count"] += 1
 
-    if actual_paths:
+    if actual_uids:
+        # Article domain_uids can differ from `qualified`'s (adaptive search
+        # may have broadened/narrowed) — fetch their hierarchy fresh rather
+        # than assuming `qualified` already has it.
+        hierarchies = await domain_tools.fetch_hierarchies(
+            toolbox, list(actual_uids.keys())
+        )
+        qualified_by_uid = {d.get("uid"): d for d in qualified}
         domain_results = sorted(
             [
                 {
+                    "uid": k,
                     "name": v["name"],
-                    "full_path": k,
                     "type": v["type"],
                     "nb_articles": v["count"],
-                    "score": next(
-                        (
-                            float(d.get("score", 1.0))
-                            for d in qualified
-                            if d.get("full_path") == k
-                        ),
-                        1.0,
-                    ),
+                    "hierarchy_label": domain_tools.format_hierarchy_label(
+                        hierarchies.get(k, [])
+                    )
+                    or v["name"],
+                    "score": float(qualified_by_uid.get(k, {}).get("score", 1.0)),
                 }
-                for k, v in actual_paths.items()
+                for k, v in actual_uids.items()
             ],
             key=lambda d: d["nb_articles"],
             reverse=True,
@@ -264,10 +269,11 @@ async def handle_domain_experts(
     else:
         domain_results = [
             {
+                "uid": d.get("uid", ""),
                 "name": d.get("name", ""),
-                "full_path": d.get("full_path", ""),
                 "type": d.get("type"),
                 "nb_articles": d.get("nb_docs", 0),
+                "hierarchy_label": d.get("hierarchy_label"),
                 "score": float(d.get("score", 1.0)),
             }
             for d in qualified[:show_max_domains]
@@ -306,7 +312,12 @@ async def handle_person_expertise(
             else f"No Sorbonne researcher found for '{person_name}'."
         )
 
-
+    # No judge step here: classify_intent always returns keywords=[] for
+    # person_expertise (the query names a person, not a topic), so there is
+    # never a real signal to score domains against. judge_domains' "always
+    # keep at least the top scorer" fallback would silently collapse this
+    # already-correct, publication-count-ranked list down to a single domain
+    # whenever the LLM scores every candidate below threshold.
     resolved_name = rows[0].get("display_name", person_name) if rows else person_name
     fr = language == "fr"
 
@@ -316,12 +327,10 @@ async def handle_person_expertise(
         lines = [f"{resolved_name}'s areas of expertise are:"]
 
     for r in rows:
-        path = _fmt_path(r.get("domain_path", "")) or r.get("domain_name", "")
+        label = r.get("hierarchy_label") or r.get("domain_name", "")
         nb = r.get("nb_publications", 0)
         s = "s" if nb > 1 else ""
-        type_label = format_type_label(r.get("domain_type"))
-        prefix = f"[{type_label}] " if type_label else ""
-        lines.append(f"* {prefix}{path} ({nb} article{s})")
+        lines.append(f"* {label} ({nb} article{s})")
 
     return "\n".join(lines)
 

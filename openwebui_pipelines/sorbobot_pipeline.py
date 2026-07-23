@@ -1,10 +1,5 @@
-import html
-import json
 from collections.abc import Generator
 from typing import Iterator, Union
-
-_MAX_FIELD_CHARS = 600
-_MAX_TOOL_RESULT_CHARS = 20_000
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -23,36 +18,6 @@ def to_langchain_messages(messages: list[dict]) -> list[BaseMessage]:
         elif role == "assistant":
             result.append(AIMessage(content=content))
     return result
-
-
-def _truncate_fields(obj):
-    if isinstance(obj, str):
-        return obj[:_MAX_FIELD_CHARS] + "…" if len(obj) > _MAX_FIELD_CHARS else obj
-    if isinstance(obj, dict):
-        return {k: _truncate_fields(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_truncate_fields(item) for item in obj]
-    return obj
-
-
-def _tool_result_block(item: dict) -> str:
-    result = item["result"]
-    if not isinstance(result, str):
-        result = json.dumps(result, ensure_ascii=False)
-    try:
-        result = json.dumps(_truncate_fields(json.loads(result)), ensure_ascii=False)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    if len(result) > _MAX_TOOL_RESULT_CHARS:
-        result = result[:_MAX_TOOL_RESULT_CHARS] + f"\n… [truncated — {len(result)} chars total]"
-    return (
-        f'<details type="tool_calls" done="true" '
-        f'id="{item["id"]}" name="{item["name"]}" '
-        f'arguments="{html.escape(json.dumps(item["args"]))}">\n'
-        f"<summary>Tool Executed</summary>\n"
-        f"{html.escape(result)}\n"
-        f"</details>\n"
-    )
 
 
 class Pipeline:
@@ -83,8 +48,9 @@ class Pipeline:
                 yield {"choices": [{"delta": {"content": item}, "finish_reason": None}]}
 
             elif isinstance(item, dict) and item.get("type") == "tool_result":
-                yield {"choices": [{"delta": {"content": "\n\n" + _tool_result_block(item)},
-                                    "finish_reason": None}]}
+                # Internal db_agent tool calls (Cypher, raw results) are
+                # intentionally not surfaced in the chat — only a transient
+                # "thinking" status, never the tool name/args/result content.
                 yield {"event": {"type": "status",
                                  "data": {"description": "Thinking…", "done": False}}}
                 pending_status = True

@@ -130,7 +130,8 @@ class SorboBotAgent:
             await self._factory.aclose()
 
     def stream(self, messages: List[BaseMessage]) -> Generator[str | dict, None, None]:
-
+        # Synchronous bridge over astream() for callers that cannot use async
+        # (e.g. OpenWebUI pipe(), which runs in a threadpool thread with no event loop).
         loop = asyncio.new_event_loop()
         gen = self.astream(messages)
         try:

@@ -1,7 +1,4 @@
 """Async domain-search, judging and author-lookup helpers for the SorboBot agent.
-
-These are plain async functions called directly by handlers.py — not
-LangChain `@tool`s — since they are never exposed to LLM tool-calling.
 """
 
 import json
@@ -9,7 +6,7 @@ import logging
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import httpx
 from langchain_core.language_models import BaseChatModel
@@ -23,27 +20,11 @@ _PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 _JUDGE_SYSTEM = (_PROMPT_DIR / "judge_domains_system.md").read_text(encoding="utf-8")
 _JUDGE_USER = "User query: {query}\n\nDomains to score:\n{domain_list}\n\nScores:"
 
-# crisalid-taxi /match `rel_type` -> equivalent Neo4j Domain.depth.
-_REL_TYPE_DEPTH = {"HAS_DOMAIN": 2, "HAS_FIELD": 3, "HAS_SUBFIELD": 4, "HAS_TOPIC": 5}
+_TYPE_DEPTH = {"domain": 2, "field": 3, "subfield": 4, "topic": 5}
 
 
 # ── Domain search ──────────────────────────────────────────────────────────────
 
-
-def format_domain_path(full_path: str) -> str:
-    """Render a Neo4j Domain.full_path as a short "A > B > C" label.
-
-    Strips the leading "root" segment and keeps only the last 3 levels.
-    Returns the input unchanged if it has no usable segments.
-    """
-    parts = [p for p in full_path.split("/-") if p and p.lower() != "root"]
-    return " > ".join(parts[-3:]) if parts else full_path
-
-
-# Domain.type values (domain/field/subfield/topic — set by
-# scripts/rebuild_domain_graph.py) -> display label. Every OpenAlex level
-# shares the same :Domain label and HAS_CONCEPT relationship, so this is the
-# only place that tells a user-facing result apart from another.
 _TYPE_LABELS = {
     "domain": "Domain",
     "field": "Field",
@@ -53,29 +34,61 @@ _TYPE_LABELS = {
 
 
 def format_type_label(type_value: Optional[str]) -> str:
-    """Render a Domain.type value as a display label (e.g. "topic" -> "Topic")."""
+    """Render a Concept.type value as a display label (e.g. "topic" -> "Topic")."""
     return _TYPE_LABELS.get((type_value or "").lower(), "")
+
+
+def format_hierarchy_label(hierarchy: List[dict]) -> str:
+    """Render an ancestor chain (Domain -> ... -> matched node, as returned by
+    `fetch_hierarchies`) as "Name [Type] > Name [Type] > ..."."""
+    parts = []
+    for h in hierarchy:
+        name = h.get("name") or "?"
+        type_label = format_type_label(h.get("type"))
+        parts.append(f"{name} [{type_label}]" if type_label else name)
+    return " > ".join(parts)
+
+
+async def fetch_hierarchies(
+    toolbox: McpToolboxClient, uids: List[str]
+) -> Dict[str, List[dict]]:
+    """Batch-fetch each uid's full ancestor chain via `get-concept-hierarchy`.
+
+    Returns {uid: [{"uid", "name", "type"}, ...]} ordered from Domain (root)
+    down to the uid's own entry, inclusive.
+    """
+    uids = [u for u in dict.fromkeys(uids) if u]
+    if not uids:
+        return {}
+    rows = await toolbox.call("sorbobot-get-concept-hierarchy", uids=",".join(uids))
+    hierarchies: Dict[str, List[dict]] = {}
+    for row in rows:
+        hierarchies.setdefault(row["uid"], []).append(
+            {
+                "uid": row.get("ancestor_uid"),
+                "name": row.get("ancestor_name"),
+                "type": row.get("ancestor_type"),
+            }
+        )
+    return hierarchies
 
 
 async def search_domains(
     toolbox: McpToolboxClient,
     keyword: str,
-    min_depth: int = 2,
     threshold: float = 0.63,
     limit: int = 20,
     taxi_url: Optional[str] = None,
 ) -> List[dict]:
-    """Find candidate Domain nodes for `keyword`.
-
-    Calls crisalid-taxi's POST /api/v1/match to semantically match `keyword`
-    against the OpenAlex taxonomy
+    """Find candidate Concept:Topic nodes (OpenAlex taxonomy) for `keyword`.
     """
     logger.info(
         "crisalid-taxi request: POST %s/api/v1/match/ keyword=%r threshold=%.2f",
         taxi_url, keyword, threshold,
     )
     async with httpx.AsyncClient(base_url=taxi_url, timeout=15.0) as client:
-
+        # Trailing slash required: crisalid-taxi 307-redirects "/match" -> "/match/",
+        # and httpx raises on redirect responses when not following them.
         response = await client.post(
             "/api/v1/match/",
             json={"inputs": [{"id": "query", "text": keyword}], "similarity_threshold": threshold},
@@ -88,32 +101,38 @@ async def search_domains(
         "crisalid-taxi response: %d match(es) for keyword=%r", len(matches), keyword
     )
 
-    candidate_uids = {
-        m["concept_uid"]
-        for m in matches
-        if _REL_TYPE_DEPTH.get(m["rel_type"], 0) >= min_depth
-    }
+    topic_matches = [m for m in matches if m.get("rel_type") == "HAS_TOPIC"]
+    similarity_by_uid = {m["concept_uid"]: m["value"] for m in topic_matches}
     logger.info(
-        "search_domains: %d/%d match(es) kept after min_depth=%d filter (keyword=%r)",
-        len(candidate_uids), len(matches), min_depth, keyword,
+        "search_domains: %d/%d match(es) kept after Topic-only filter (keyword=%r)",
+        len(topic_matches), len(matches), keyword,
     )
 
-    if not candidate_uids:
+    if not similarity_by_uid:
         logger.info(
-            "search_domains: no candidate uid — returning no domains (keyword=%r)",
+            "search_domains: no candidate Topic — returning no domains (keyword=%r)",
             keyword,
         )
         return []
 
     domains = await toolbox.call(
-        "get-domains-by-uid",
-        uids=",".join(candidate_uids),
+        "sorbobot-get-domains-by-uid",
+        uids=",".join(similarity_by_uid),
         similarity_threshold=threshold,
     )
     logger.info(
         "search_domains: get-domains-by-uid -> %d domain(s) (keyword=%r)",
         len(domains), keyword,
     )
+
+    hierarchies = await fetch_hierarchies(
+        toolbox, [d["uid"] for d in domains if d.get("uid")]
+    )
+    for d in domains:
+        hierarchy = hierarchies.get(d.get("uid"), [])
+        d["hierarchy"] = hierarchy
+        d["hierarchy_label"] = format_hierarchy_label(hierarchy)
+        d["taxi_similarity"] = similarity_by_uid.get(d.get("uid"))
 
     return domains[:limit]
 
@@ -123,22 +142,22 @@ async def search_domains(
 
 def _judge_score_heuristic(keywords: List[str], domain: dict) -> float:
     """
-    Combines keyword overlap on name/path + depth fitness.
+    Combines keyword overlap on name/hierarchy + depth fitness.
     Returns a float in [0, 1].
     """
     name = domain.get("name", "").lower()
-    path = domain.get("full_path", "").lower()
-    depth = int(domain.get("depth", 3))
+    hierarchy_label = (domain.get("hierarchy_label") or "").lower()
+    depth = _TYPE_DEPTH.get((domain.get("type") or "").lower(), 3)
     kw_lower = [kw.lower() for kw in keywords]
 
     kw_hits = 0.0
     for kw in kw_lower:
         kw_words = [w for w in kw.split() if len(w) > 2]
-        if kw in name or kw in path:
+        if kw in name or kw in hierarchy_label:
             kw_hits += 1.0
-        elif kw_words and all(w in name or w in path for w in kw_words):
+        elif kw_words and all(w in name or w in hierarchy_label for w in kw_words):
             kw_hits += 0.7
-        elif kw_words and any(w in name or w in path for w in kw_words):
+        elif kw_words and any(w in name or w in hierarchy_label for w in kw_words):
             kw_hits += 0.4
     kw_score = kw_hits / max(len(kw_lower), 1)
 
@@ -154,11 +173,10 @@ def _judge_score_heuristic(keywords: List[str], domain: dict) -> float:
 
 def _fmt_domain_for_llm(d: dict) -> str:
     """Format a domain dict as a single line for the judge prompt."""
-    full_path = d.get("full_path", "")
-    path_str = format_domain_path(full_path) if full_path else d.get("name", "?")
+    hierarchy_label = d.get("hierarchy_label") or d.get("name", "?")
     type_label = format_type_label(d.get("type"))
     desc = d.get("description") or ""
-    base = f"- Name: {d.get('name', '?')} | Type: {type_label or '?'} | Path: {path_str}"
+    base = f"- Name: {d.get('name', '?')} | Type: {type_label or '?'} | Path: {hierarchy_label}"
     return f"{base} | Description: {desc}" if desc else base
 
 
@@ -170,10 +188,6 @@ async def judge_domains(
     threshold: float = 0.7,
 ) -> List[dict]:
     """Score candidate domains against the user's query using the LLM.
-
-    Returns a list of {name, full_path, score}, keeping only domains with
-    score >= threshold (always keeps at least the top scorer). threshold=0
-    disables filtering entirely.
     """
     if not domains:
         return []
@@ -186,9 +200,13 @@ async def judge_domains(
         logger.info("judge_domains: threshold=0 — judge disabled, keeping all domains")
         return [
             {
+                "uid": d.get("uid"),
                 "name": d.get("name"),
-                "full_path": d.get("full_path"),
+                "hierarchy": d.get("hierarchy", []),
+                "hierarchy_label": d.get("hierarchy_label"),
                 "type": d.get("type"),
+                "nb_docs": d.get("nb_docs"),
+                "taxi_similarity": d.get("taxi_similarity"),
                 "score": 1.0,
             }
             for d in domains
@@ -236,9 +254,13 @@ async def judge_domains(
 
     qualified = [
         {
+            "uid": d.get("uid"),
             "name": d.get("name"),
-            "full_path": d.get("full_path"),
+            "hierarchy": d.get("hierarchy", []),
+            "hierarchy_label": d.get("hierarchy_label"),
             "type": d.get("type"),
+            "nb_docs": d.get("nb_docs"),
+            "taxi_similarity": d.get("taxi_similarity"),
             "score": round(s, 3),
         }
         for d, s in qualified_pairs
@@ -250,7 +272,7 @@ async def judge_domains(
         len(qualified),
         len(domains),
         threshold,
-        [d["full_path"] for d in qualified],
+        [d["hierarchy_label"] for d in qualified],
     )
     return qualified
 
@@ -258,27 +280,31 @@ async def judge_domains(
 # ── Authors ────────────────────────────────────────────────────────────────────
 
 
+_DEFAULT_MIN_DOCS = 5
+
+
 async def get_domain_authors(
     toolbox: McpToolboxClient,
-    domain_paths: List[str],
-    author_min: int = 10,
-    author_max: int = 20,
+    domains: List[dict],
+    min_docs: int = _DEFAULT_MIN_DOCS,
 ) -> List[dict]:
-    """Internal Sorbonne researchers for the given domains, via adaptive tree search.
+    """Internal Sorbonne researchers for the given (Topic) domains.
     """
-    final_paths, authors_data = await _adaptive_tree_search(
-        toolbox,
-        initial_paths=domain_paths,
-        target_authors_min=author_min,
-        target_authors_max=author_max,
+    search_uids = await _resolve_search_scope(toolbox, domains, min_docs)
+    authors_data = await toolbox.call(
+        "sorbobot-list-domain-experts", uids=",".join(search_uids)
+    )
+    logger.info(
+        "get_domain_authors: searching uids=%s -> %d author(s)",
+        search_uids, len({a["person_uid"] for a in authors_data}),
     )
 
     result = []
     for a in authors_data:
         articles_raw = a.get("articles", [])
-        # Group by domain path first, then sample round-robin across paths.
+        # Group by domain uid first, then sample round-robin across domains.
         seen: set = set()
-        by_path: dict = {}
+        by_uid: dict = {}
         for art in articles_raw:
             if not isinstance(art, dict):
                 continue
@@ -286,10 +312,10 @@ async def get_domain_authors(
             if uid in seen:
                 continue
             seen.add(uid)
-            by_path.setdefault(art.get("path", ""), []).append(art)
+            by_uid.setdefault(art.get("domain_uid", ""), []).append(art)
 
         sample_articles = []
-        buckets = list(by_path.values())
+        buckets = list(by_uid.values())
         while len(sample_articles) < 10 and any(buckets):
             for bucket in buckets:
                 if not bucket:
@@ -299,7 +325,8 @@ async def get_domain_authors(
                     {
                         "uid": art.get("uid", ""),
                         "title": art.get("title", ""),
-                        "path": art.get("path", ""),
+                        "domain_uid": art.get("domain_uid", ""),
+                        "domain_name": art.get("domain_name", ""),
                         "type": art.get("type", ""),
                     }
                 )
@@ -319,94 +346,62 @@ async def get_domain_authors(
         )
 
     logger.info(
-        "get_domain_authors: %d input path(s) -> %d final path(s) -> %d author(s)",
-        len(domain_paths),
-        len(final_paths),
+        "get_domain_authors: %d domain(s) -> %d author(s)",
+        len(domains),
         len(result),
     )
     return result
 
 
-# ── Adaptive search — broaden/narrow domain scope ─────────────────────────────
+# ── Search scope resolution — broaden to SubField when too few docs ─────────
 
 
-async def _adaptive_tree_search(
+async def _resolve_search_scope(
     toolbox: McpToolboxClient,
-    initial_paths: List[str],
-    target_authors_min: int = 5,
-    target_authors_max: int = 10,
-    max_iterations: int = 3,
-) -> Tuple[List[str], List[dict]]:
-    """Navigate up/down the domain tree until the author count fits the target range."""
-    current_paths = initial_paths.copy()
-    iteration = 0
+    domains: List[dict],
+    min_docs: int = _DEFAULT_MIN_DOCS,
+) -> List[str]:
+    """Decide which uid(s) to pass to `sorbobot-list-domain-experts`.
 
-    while iteration < max_iterations:
-        authors = await toolbox.call(
-            "list-domain-experts", domain_paths=",".join(current_paths)
+    If the matched Topics collectively cover at least `min_docs` documents,
+    search them directly. Otherwise broaden once to their most common parent
+    SubField (ties broken by the highest `taxi_similarity` among that
+    SubField's matched Topics).
+    """
+    total_docs = sum(d.get("nb_docs") or 0 for d in domains)
+    if total_docs >= min_docs:
+        return [d["uid"] for d in domains if d.get("uid")]
+
+    subfield_stats: Dict[str, Dict[str, float]] = {}
+    for d in domains:
+        hierarchy = d.get("hierarchy") or []
+        if len(hierarchy) < 2:
+            continue  # no SubField ancestor available
+        subfield_uid = hierarchy[-2].get("uid")
+        if not subfield_uid:
+            continue
+        stats = subfield_stats.setdefault(subfield_uid, {"count": 0, "best_similarity": -1.0})
+        stats["count"] += 1
+        stats["best_similarity"] = max(
+            stats["best_similarity"], d.get("taxi_similarity") or 0.0
         )
-        nb_authors = len({a["person_uid"] for a in authors})
+
+    if not subfield_stats:
         logger.info(
-            "_adaptive_tree_search[%d]: %d author(s) for paths=%s (target=%d-%d)",
-            iteration, nb_authors, current_paths, target_authors_min, target_authors_max,
+            "_resolve_search_scope: only %d doc(s) but no SubField ancestor available — searching as-is",
+            total_docs,
         )
+        return [d["uid"] for d in domains if d.get("uid")]
 
-        if target_authors_min <= nb_authors <= target_authors_max:
-            return current_paths, authors
-
-        if nb_authors > target_authors_max:
-            # Too many -> go down to children
-            new_paths = []
-            for path in current_paths:
-                children = await toolbox.call(
-                    "get-child-domains", full_paths=path, depth_delta=1
-                )
-                if children:
-                    new_paths.extend([c["full_path"] for c in children])
-                else:
-                    new_paths.append(path)
-            new_paths = list(set(new_paths))
-            logger.info(
-                "_adaptive_tree_search[%d]: too many — narrowing to %s",
-                iteration, new_paths,
-            )
-        else:
-            # Too few -> go up to parents
-            new_paths = []
-            for path in current_paths:
-                parents = await toolbox.call(
-                    "get-parent-domains", full_paths=path, depth_delta=1
-                )
-                if parents:
-                    new_paths.extend([p["full_path"] for p in parents])
-                else:
-                    new_paths.append(path)
-            new_paths = list(set(new_paths))
-            logger.info(
-                "_adaptive_tree_search[%d]: too few — broadening to %s",
-                iteration, new_paths,
-            )
-
-        if set(new_paths) == set(current_paths):
-            # No domain has children/parents to move to (e.g. every path is
-            # already a leaf topic) — further iterations would be a no-op.
-            logger.info(
-                "_adaptive_tree_search[%d]: no further narrowing/broadening possible — stopping",
-                iteration,
-            )
-            return current_paths, authors
-
-        current_paths = new_paths
-        iteration += 1
-
-    authors = await toolbox.call(
-        "list-domain-experts", domain_paths=",".join(current_paths)
+    best_subfield_uid = max(
+        subfield_stats,
+        key=lambda uid: (subfield_stats[uid]["count"], subfield_stats[uid]["best_similarity"]),
     )
     logger.info(
-        "_adaptive_tree_search: max_iterations reached — %d author(s) for paths=%s",
-        len({a["person_uid"] for a in authors}), current_paths,
+        "_resolve_search_scope: only %d doc(s) across %d Topic(s) — broadening to SubField %s",
+        total_docs, len(domains), best_subfield_uid,
     )
-    return current_paths, authors
+    return [best_subfield_uid]
 
 
 # ── Person expertise ────────────────────────────────────────────────────────────
@@ -418,7 +413,7 @@ async def get_person_expertise(toolbox: McpToolboxClient, name: str) -> List[dic
     """Top research domains for a named internal Sorbonne researcher.
     """
     candidates = await toolbox.call(
-        "search-person-by-name-fuzzy", name=name, max_results=50
+        "sorbobot-search-person-by-name-fuzzy", name=name, max_results=50
     )
     logger.info(
         "get_person_expertise: %d candidate(s) for name=%r", len(candidates), name
@@ -442,4 +437,13 @@ async def get_person_expertise(toolbox: McpToolboxClient, name: str) -> List[dic
         logger.info("get_person_expertise: best match below threshold — returning empty")
         return []
 
-    return await toolbox.call("list-person-research-domains", person_uid=best["uid"])
+    domains = await toolbox.call("sorbobot-list-person-research-domains", person_uid=best["uid"])
+    hierarchies = await fetch_hierarchies(
+        toolbox, [d["domain_uid"] for d in domains if d.get("domain_uid")]
+    )
+    for d in domains:
+        hierarchy = hierarchies.get(d.get("domain_uid"), [])
+        d["hierarchy"] = hierarchy
+        d["hierarchy_label"] = format_hierarchy_label(hierarchy)
+
+    return domains

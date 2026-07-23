@@ -54,8 +54,7 @@ Connects at runtime to an external MCP Toolbox server (`CRISALID_MCP_TOOLBOX_URL
 Domain-expert / person-expertise / database-query agent for the Sorbonne
 research graph. Source and docs live in the sibling `sorbobot-agent` repo
 (see its own CLAUDE.md). Uses `MCP_TOOLBOX_URL`/`MCP_TOOLBOX_TOOLSET`
-(`crisalid-sorbobot` toolset, distinct from `crisalid_graph_agent`'s
-`CRISALID_MCP_TOOLBOX_*`) and `CRISALID_TAXI_URL` for semantic domain
+(`sorbobot` toolset) and `CRISALID_TAXI_URL` for semantic domain
 matching. No Keycloak support — runs unauthenticated only.
 
 ### OpenWebUI Pipelines
@@ -74,7 +73,7 @@ The pipelines server runs on `http://localhost:9099` and is treated by OpenWebUI
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | Neo4j connection |
 | `CRISALID_MCP_TOOLBOX_URL` | MCP Toolbox server URL (crisalid_graph_agent) |
 | `CRISALID_MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox (crisalid_graph_agent) |
-| `MCP_TOOLBOX_URL` | MCP Toolbox server URL (SorboBot, `crisalid-sorbobot` toolset) |
+| `MCP_TOOLBOX_URL` | MCP Toolbox server URL (SorboBot, `sorbobot` toolset) |
 | `MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox (SorboBot) |
 | `CRISALID_TAXI_URL` | crisalid-taxi service URL, for SorboBot's semantic domain matching |
 | `KEYCLOAK_ISSUER` | Keycloak issuer URL (e.g. `https://keycloak.example.com/realms/my-realm`); omit to disable auth |
