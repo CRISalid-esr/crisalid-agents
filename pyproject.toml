@@ -13,6 +13,15 @@ dependencies = [
     "toolbox-langchain>=1.0.0",
 ]
 
+[project.optional-dependencies]
+# Deps of the FastAPI wrapper (chat_api/) only. The OpenWebUI Pipelines image must
+# NOT install these: its base image ships its own fastapi/uvicorn versions.
+chat-api = [
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.4",
+    "python-dotenv>=1.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
