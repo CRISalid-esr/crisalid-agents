@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Install dependencies (run both — uv sync resets the venv and wipes the pipelines extras)
-uv sync
+uv sync --extra chat-api
 uv pip install -r .openwebui-pipelines/requirements.txt
 
 # Run Pipelines server (production)
@@ -14,6 +14,16 @@ uv pip install -r .openwebui-pipelines/requirements.txt
 
 # Debug Pipelines server in IDE (PyCharm)
 uv run python scripts/debug_openwebui_pipelines.py
+
+# Run chat API (MUI X Chat NDJSON streaming endpoint)
+uv run uvicorn chat_api.main:app --port 9100 --reload
+
+# Debug chat API in IDE (PyCharm)
+uv run python scripts/debug_chat_api.py
+
+# Build deployment images (one per wrapper, from the repo root)
+docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
+docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
 **After any `uv add`, `uv remove`, or `uv sync`, re-run the `uv pip install` line** — `uv sync` resets the venv to exactly `pyproject.toml` and removes the OpenWebUI Pipelines extras installed separately.
@@ -28,6 +38,7 @@ The layering is strict: core agents have no knowledge of the interface that call
 
 ```
 openwebui_pipelines/   ← OpenWebUI adapters (convert messages, call agents)
+chat_api/              ← FastAPI endpoint streaming MUI X Chat NDJSON chunks (port 9100)
 neo4j_cypher_agent/    ← Agent 1: generates Cypher, executes it, answers in natural language
 crisalid_graph_agent/  ← Agent 2: calls MCP Toolbox tools via LangGraph ReAct agent
 sorbobot_agent/        ← Agent 3: domain-expert / person-expertise / database-query agent
@@ -63,6 +74,14 @@ Each pipeline is a `Pipeline` class with a `pipe()` method. It converts OpenWebU
 
 The pipelines server runs on `http://localhost:9099` and is treated by OpenWebUI as an OpenAI-compatible endpoint.
 
+### Chat API (`chat_api/`)
+
+FastAPI wrapper for MUI X Chat webapps. `POST /chat` streams NDJSON message chunks; `GET /health` is an unauthenticated health check. It is called only server-to-server from the internal Docker network (no CORS, never directly from a browser). Inbound auth (`chat_api/auth.py`) uses the same scheme as crisalid-apollo: the `x-api-key` header is checked against the comma-separated `API_KEYS` env var, toggled by `ENABLE_API_KEYS` (proper OIDC end-user auth planned later). Its extra deps (fastapi, uvicorn) live in the `chat-api` optional-dependency group, **not** in core dependencies: the pipelines Docker image must not override the fastapi/uvicorn versions shipped by its base image.
+
+### Docker
+
+Each wrapper has its own image, built from the repo root: `docker/pipelines.Dockerfile` (base `ghcr.io/open-webui/pipelines`, port 9099) and `docker/chat-api.Dockerfile` (base `python:3.11-slim`, uvicorn on port 9100). Both install core deps from `uv.lock` and copy `common/` + `crisalid_graph_agent/`; only the chat-api image installs the `chat-api` extra.
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -76,10 +95,12 @@ The pipelines server runs on `http://localhost:9099` and is treated by OpenWebUI
 | `MCP_TOOLBOX_URL` | MCP Toolbox server URL (SorboBot, `sorbobot` toolset) |
 | `MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox (SorboBot) |
 | `CRISALID_TAXI_URL` | crisalid-taxi service URL, for SorboBot's semantic domain matching |
-| `KEYCLOAK_ISSUER` | Keycloak issuer URL (e.g. `https://keycloak.example.com/realms/my-realm`); omit to disable auth |
-| `KEYCLOAK_CLIENT_ID` | Service account client ID |
-| `KEYCLOAK_CLIENT_SECRET` | Service account client secret |
+| `KEYCLOAK_ISSUER` | Keycloak issuer URL (e.g. `https://keycloak.example.com/realms/my-realm`); omit to disable outbound toolbox auth |
+| `KEYCLOAK_CLIENT_ID` | Service account client ID (outbound toolbox auth) |
+| `KEYCLOAK_CLIENT_SECRET` | Service account client secret (outbound toolbox auth) |
 | `KEYCLOAK_SSL_VERIFY` | Set to `false` to skip TLS verification (local dev with self-signed certs) |
+| `ENABLE_API_KEYS` | Chat API inbound auth toggle; on unless set to `false` (same scheme as crisalid-apollo) |
+| `API_KEYS` | Comma-separated valid values for the chat API `x-api-key` header |
 
 ## Conventions
 
