@@ -1,3 +1,5 @@
+# OpenWebUI Pipelines wrapper image.
+# Build from the repository root: docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
 FROM ghcr.io/open-webui/pipelines:main
 
 WORKDIR /app
@@ -5,7 +7,8 @@ WORKDIR /app
 # Install uv for locked dependency resolution
 RUN pip install uv --quiet
 
-# Install project runtime deps from the lock file (layer-cached until pyproject.toml/uv.lock change)
+# Install project runtime deps from the lock file (layer-cached until pyproject.toml/uv.lock change).
+# No extras: the chat-api extra (fastapi/uvicorn) must not override the base image's own versions.
 COPY pyproject.toml uv.lock ./
 RUN uv export --no-dev --frozen -q > /tmp/requirements.txt && \
     uv pip install --system -r /tmp/requirements.txt --no-cache-dir && \

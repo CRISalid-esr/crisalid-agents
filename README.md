@@ -3,8 +3,9 @@
 LangChain / LangGraph agents connected to the CRISalid ecosystem.
 
 The goal of this project is to provide reusable Python agents that can interact with CRISalid services and data sources,
-while remaining independent from any single chat interface. Agents can be exposed through OpenWebUI Pipelines today, and
-later through other interfaces such as LibreChat, a FastAPI service, a CLI, or background workers.
+while remaining independent from any single chat interface. Agents are currently exposed through two adapters — an
+OpenWebUI Pipeline and a FastAPI chat API for webapp frontends (MUI X Chat) — and can later be exposed through other
+interfaces such as LibreChat, a CLI, or background workers.
 
 ## Core idea
 
@@ -19,27 +20,26 @@ later through other interfaces such as LibreChat, a FastAPI service, a CLI, or b
 2. **Interface adapters**
 
     * Convert incoming data to the format expected by the agent.
-    * The current first adapter is an OpenWebUI Pipeline.
+    * Two adapters exist: an OpenWebUI Pipeline (`openwebui_pipelines/`) and a FastAPI chat API (`chat_api/`).
 
 Current architecture:
 
 ```text
-OpenWebUI
-  │
-  ▼
-openwebui_pipelines/crisalid_agent.py
-  │
-  ▼
-neo4j_cypher_agent.py (first example agent)
-  │
-  ▼
-LangGraph workflow
-  │
-  ▼
-LangChain tools / chains / CRISalid services / Neo4j
+OpenWebUI                      Webapp (MUI X Chat)
+  │                              │
+  ▼                              ▼
+openwebui_pipelines/           chat_api/  (NDJSON streaming, port 9100)
+  │                              │
+  └──────────────┬───────────────┘
+                 ▼
+      core agents (neo4j_cypher_agent, crisalid_graph_agent)
+                 │
+                 ▼
+      LangGraph workflow
+                 │
+                 ▼
+      LangChain tools / MCP Toolbox / CRISalid services / Neo4j
 ```
-
-The current `neo4j_cypher_agent` is only a first working example.
 
 ## OpenWebUI Pipelines setup and Python dependency management
 
@@ -48,8 +48,12 @@ This project uses `uv`.
 Example setup:
 
 ```bash
-uv sync
+uv sync --extra chat-api
 ```
+
+The `chat-api` extra pulls the FastAPI wrapper dependencies (fastapi, uvicorn). They are kept out of the core
+dependencies on purpose: the OpenWebUI Pipelines Docker image ships its own fastapi/uvicorn versions and must not have
+them overridden.
 
 The local virtual environment is expected to be under:
 
@@ -188,16 +192,64 @@ OpenWebUI may call the selected model for auxiliary tasks such as:
 These OpenWebUI-generated calls should be disabled in OpenWebUI settings while using CRISalid
 agent pipelines.
 
-## Debugging in PyCharm
+## Running the agent as a chat API (webapp frontends)
 
-A debug launcher is provided:
+The second adapter, `chat_api/`, exposes `crisalid_graph_agent` to webapp frontends built with MUI X Chat.
+`POST /chat` streams NDJSON message chunks (text deltas and tool invocations); `GET /health` is an unauthenticated
+health check.
 
-```text
-scripts/debug_openwebui_pipelines.py
+```bash
+uv run uvicorn chat_api.main:app --port 9100 --reload
 ```
 
-This script starts the Pipelines FastAPI app directly through Python, instead of going through `start.sh`. This makes
-IDE breakpoints available.
+### Authentication
+
+The chat API is meant to be called server-to-server from the internal Docker network only, never directly from the
+browser (there is no CORS support). Inbound requests are authenticated with the same scheme as crisalid-apollo: the
+`x-api-key` header is checked against the comma-separated `API_KEYS` env var, and the check is enabled unless
+`ENABLE_API_KEYS` is set to `false`:
+
+```env
+ENABLE_API_KEYS="true"
+API_KEYS="key1,another_key"
+```
+
+Proper OIDC end-user authentication is planned for later.
+
+```bash
+curl -N http://localhost:9100/chat \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: key1" \
+  -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Who works on machine learning?"}]}}'
+```
+
+## Docker images
+
+Each adapter has its own image, built from the repository root:
+
+```bash
+# OpenWebUI Pipelines wrapper (base image ghcr.io/open-webui/pipelines, port 9099)
+docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
+
+# FastAPI chat API wrapper (base image python:3.11-slim, port 9100)
+docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
+```
+
+Both install the core dependencies from `uv.lock` and copy the core agent packages; only the chat-api image installs
+the `chat-api` extra. Runtime configuration is injected at deploy time through the env vars declared in each
+Dockerfile.
+
+## Debugging in PyCharm
+
+Two debug launchers are provided:
+
+```text
+scripts/debug_openwebui_pipelines.py   # Pipelines server on port 9099
+scripts/debug_chat_api.py              # chat API on port 9100
+```
+
+These scripts start the corresponding FastAPI app directly through Python (without `start.sh` or uvicorn's `--reload`
+subprocess). This makes IDE breakpoints available.
 
 Typical PyCharm configuration:
 
@@ -210,6 +262,7 @@ Use:
 ```text
 Script path:
   /path/to/projects/crisalid-agents/scripts/debug_openwebui_pipelines.py
+  (or scripts/debug_chat_api.py)
 
 Working directory:
   /path/to/projects/crisalid-agents
@@ -222,40 +275,28 @@ Then run the configuration in debug mode.
 
 ## LLM configuration
 
-The project can use either the official OpenAI API or an OpenAI-compatible model provider such as vLLM / ILAAS.
+The project can use either the official OpenAI API or any OpenAI-compatible model provider such as vLLM / ILAAS.
 
-Example `.env`:
+Example `.env` (see `.env.sample` for the full list):
 
 ```env
-LLM_PROVIDER=openai
-
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
-
-ILAAS_API_URL=https://your-ilaas-server/v1
-ILAAS_API_KEY=...
-ILAAS_API_MODEL=...
+# Omit LLM_API_BASE to use the official OpenAI API
+LLM_API_BASE=https://llm.ilaas.fr/v1
+MODEL=mistral-medium-250523
+API_KEY=...
 
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=...
 ```
 
-For ILAAS / vLLM:
+## Core agents
 
-```env
-LLM_PROVIDER=ilaas
-ILAAS_API_URL=https://llm.ilaas.fr/v1
-ILAAS_API_KEY=...
-ILAAS_API_MODEL=...
-```
+Two agents currently exist:
 
-## Neo4j QA agent
-
-The current example agent uses LangChain's Neo4j integration and Cypher generation.
-
-The Cypher generation is guided by:
-
-```text
-base_agent/fewshot_examples.json
-```
+* **`neo4j_cypher_agent`** — uses LangChain's Neo4j integration: it generates a Cypher query from the question, runs
+  it, and synthesizes a natural-language answer. The Cypher generation is guided by
+  `neo4j_cypher_agent/fewshot_examples.json`.
+* **`crisalid_graph_agent`** — a LangGraph ReAct agent that connects at runtime to an external MCP Toolbox server
+  (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`). When the
+  `KEYCLOAK_*` env vars are set, it authenticates to the toolbox with a Keycloak service account (client credentials).
