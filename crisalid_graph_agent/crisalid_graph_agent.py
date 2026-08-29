@@ -28,10 +28,13 @@ class CrisalidGraphAgent:
         return asyncio.run(self.ainvoke(messages))
 
     async def astream(self, messages: list[BaseMessage]) -> AsyncGenerator[str | dict, None]:
-        # Yields two kinds of items:
+        # Yields three kinds of items:
         #   - str          : one LLM token destined for the user (final answer only)
-        #   - dict         : a tool_result event carrying id/name/args/result,
-        #                    emitted once per tool call after the tool node completes
+        #   - dict tool_call   : id/name/args, emitted as soon as the agent node decides
+        #                        the call — before the tool runs — so UIs can show a
+        #                        pending tool invocation during tool execution
+        #   - dict tool_result : id/name/args/result, emitted once per tool call after
+        #                        the tool node completes
         #
         # The graph runs a ReAct loop: agent → tools → agent → … → agent (final answer).
         # "messages" parts stream tokens as they are generated; "updates" parts carry
@@ -70,6 +73,14 @@ class CrisalidGraphAgent:
                             # Strip embedding vectors (_vector suffix) — they are 1 024-float arrays
                             # injected by _embed_semantic_params and must not be forwarded to the UI.
                             "args": {k: v for k, v in tc.get("args", {}).items() if not k.endswith("_vector")},
+                        }
+                        # Surface the call immediately (not buffered like tool_result):
+                        # the tool is about to run and may take seconds.
+                        yield {
+                            "type": "tool_call",
+                            "id": tc["id"],
+                            "name": pending_tool_calls[tc["id"]]["name"],
+                            "args": pending_tool_calls[tc["id"]]["args"],
                         }
 
                 elif "tools" in data:
