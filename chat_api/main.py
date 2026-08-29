@@ -71,6 +71,7 @@ async def _stream_chunks(
     message_id = f"msg-{uuid.uuid4()}"
     text_id: str | None = None
     text_block_count = 0
+    emitted_tool_inputs: set[str] = set()
 
     yield _line({"type": "start", "messageId": message_id})
     try:
@@ -82,9 +83,10 @@ async def _stream_chunks(
                     yield _line({"type": "text-start", "id": text_id})
                 yield _line({"type": "text-delta", "id": text_id, "delta": item})
 
-            elif isinstance(item, dict) and item.get("type") == "tool_result":
-                # Tool activity interrupts any open text block: close it so the
-                # tool invocation renders as its own message part.
+            elif isinstance(item, dict) and item.get("type") == "tool_call":
+                # The agent just decided to call a tool; the tool has not run yet.
+                # Emit the input immediately so the UI shows a pending invocation
+                # instead of dead silence while the tool executes.
                 if text_id is not None:
                     yield _line({"type": "text-end", "id": text_id})
                     text_id = None
@@ -96,6 +98,25 @@ async def _stream_chunks(
                         "input": item["args"],
                     }
                 )
+                emitted_tool_inputs.add(item["id"])
+
+            elif isinstance(item, dict) and item.get("type") == "tool_result":
+                # Tool activity interrupts any open text block: close it so the
+                # tool invocation renders as its own message part.
+                if text_id is not None:
+                    yield _line({"type": "text-end", "id": text_id})
+                    text_id = None
+                if item["id"] not in emitted_tool_inputs:
+                    # Fallback for a result whose tool_call event was never seen.
+                    yield _line(
+                        {
+                            "type": "tool-input-available",
+                            "toolCallId": item["id"],
+                            "toolName": item["name"],
+                            "input": item["args"],
+                        }
+                    )
+                    emitted_tool_inputs.add(item["id"])
                 yield _line(
                     {
                         "type": "tool-output-available",
