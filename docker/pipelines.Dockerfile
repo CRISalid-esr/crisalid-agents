@@ -1,4 +1,4 @@
-# OpenWebUI Pipelines wrapper image.
+# OpenWebUI Pipelines wrapper image: serves every agent under agents/ as an OpenWebUI model.
 # Build from the repository root: docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
 FROM ghcr.io/open-webui/pipelines:main
 
@@ -14,24 +14,18 @@ RUN uv export --no-dev --frozen -q > /tmp/requirements.txt && \
     uv pip install --system -r /tmp/requirements.txt --no-cache-dir && \
     rm /tmp/requirements.txt
 
-# Copy project source packages (importable from /app, which is on PYTHONPATH)
+# Project source packages (importable from /app, which is on PYTHONPATH)
 COPY common/ ./common/
-COPY crisalid_graph_agent/ ./crisalid_graph_agent/
+COPY agents/ ./agents/
 
-# Install the pipeline into the pipelines directory served by the OpenWebUI runner
-COPY openwebui_pipelines/crisalid_graph_agent_pipeline.py ./pipelines/crisalid_graph_agent_pipeline.py
+# One two-line stub per agent, served from the pipelines directory of the OpenWebUI runner
+COPY openwebui_pipelines/*.py ./pipelines/
 
-# Declare runtime env vars — values must be injected at deploy time (Docker Compose / K8s).
-# No defaults are set here so that a missing variable causes a visible failure rather than
-# silent misconfiguration.
-ENV MODEL="" \
-    API_KEY="" \
-    LLM_API_BASE="" \
-    CRISALID_MCP_TOOLBOX_URL="" \
-    CRISALID_MCP_TOOLBOX_TOOLSET="" \
-    KEYCLOAK_ISSUER="" \
-    KEYCLOAK_CLIENT_ID="" \
-    KEYCLOAK_CLIENT_SECRET="" \
-    KEYCLOAK_SSL_VERIFY="true"
+# Runtime configuration is injected at deploy time (Docker Compose / K8s); no defaults are set
+# here so that a missing variable causes a visible failure rather than silent misconfiguration.
+#   AGENTS                  comma-separated agents to serve (default: all under agents/)
+#   MODEL / API_KEY / LLM_API_BASE                     LLM endpoint
+#   CRISALID_MCP_TOOLBOX_URL / CRISALID_MCP_TOOLBOX_TOOLSET, KEYCLOAK_*, EMBEDDING_*   see README
+ENV AGENTS=""
 
 # Port and entrypoint are inherited from the base image (ghcr.io/open-webui/pipelines)
