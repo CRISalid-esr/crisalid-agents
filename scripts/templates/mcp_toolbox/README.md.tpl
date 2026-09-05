@@ -7,8 +7,9 @@ over the tools of an MCP Toolbox toolset.
 
 What this package contains:
 
-- `agent.py` — an `MCPToolboxAgent` subclass declaring the prompt, the toolset and an
-  optional `postprocess_tool_message()` hook, plus the `create_agent()` factory.
+- `agent.py` — a `LangGraphAgent` subclass owning the whole graph (toolset loading, LLM chain with
+  retry and semantic parameter embedding, agent/tools loop, `postprocess_tool_message()` hook), plus
+  the `create_agent()` factory. Copied from `agents/generic_agent`; adapt it freely.
 - `system_prompt.md` — the system prompt, loaded next to the code.
 
 Configuration (env vars):
@@ -19,8 +20,8 @@ Configuration (env vars):
 
 What the framework provides (nothing to write per agent):
 
-- The LangGraph loop, tool loading, `semantic_*` parameter embedding and the event stream
-  (`common/mcp_toolbox_agent.py`, `common/langgraph_agent.py`).
+- The event stream consumed by both adapters (`common/langgraph_agent.py`), the toolbox client
+  (`common/mcp_toolbox_client.py`), the embedding provider and the raw tool-call parser.
 - The OpenWebUI pipeline (`openwebui_pipelines/${name}_pipeline.py`) and the chat API route
   `POST /agents/$name/chat`.
 

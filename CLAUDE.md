@@ -58,9 +58,9 @@ once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI th
 - `common/langgraph_agent.py` — `LangGraphAgent`: implement `build_graph()` (a `MessagesState` graph with `agent` and
   `tools` nodes); translation of LangGraph stream parts into events is done here. Class attributes tune node names,
   an optional tool-result post-processing node, and argument suffixes hidden from UIs.
-- `common/mcp_toolbox_agent.py` — `MCPToolboxAgent(LangGraphAgent)`: ReAct loop over an MCP Toolbox toolset
-  (`common/mcp_toolbox_client.py`, optional Keycloak service-account auth), `semantic_*` parameter embedding
-  (`common/embedding.py`), Mistral raw tool-call workaround, `postprocess_tool_message()` hook.
+- `common/mcp_toolbox_client.py` (toolset loading, optional Keycloak service-account auth), `common/embedding.py`
+  (embedding provider) and `common/tool_calls.py` (Mistral raw tool-call recovery, opt-in) are shared helpers.
+  They hold no graph logic: every agent owns its graph in `agents/<name>/agent.py`.
 - `common/registry.py` — discovers `agents/*/agent.py:create_agent()`; `AGENTS` env var restricts the served set.
   Instances are cached per process and closed on shutdown.
 
@@ -69,8 +69,10 @@ once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI th
 - `agents/dummy_agent/` — reference agent: `LangGraphAgent` subclass with one local tool (`count_words`). It is the
   checked-in rendering of the `dummy` scaffold template (a test enforces they stay identical: regenerate with
   `create_new_agent.py dummy_agent --force ...` after editing the template).
-- `agents/generic_agent/` — `MCPToolboxAgent` subclass over the `CRISALID_MCP_TOOLBOX_TOOLSET` toolset,
-  prompt chosen per toolset, schema tool output compacted by `schema_postprocessor.py`.
+- `agents/generic_agent/` — ReAct loop over the `CRISALID_MCP_TOOLBOX_TOOLSET` toolset: LLM chain with retry, raw
+  tool-call recovery and `semantic_*` parameter embedding, `agent → tools → postprocess_tools` graph, prompt chosen per
+  toolset, schema tool output compacted by `schema_postprocessor.py`. The `mcp-toolbox` scaffold template is a copy of
+  this graph with a no-op post-processing hook.
 
 ### Adapters
 

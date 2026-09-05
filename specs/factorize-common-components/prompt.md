@@ -312,3 +312,8 @@ Deviations from the design above, decided during implementation:
 
 - **Rename (2026-09-05)** — `crisalid_graph_agent` renamed `generic_agent` (`GenericAgent`, display name "Generic agent",
   stub `generic_agent_pipeline.py`); the OpenWebUI model id becomes `generic_agent_pipeline`.
+
+- **Graph ownership (2026-09-05)** — `MCPToolboxAgent` removed: the ReAct loop, retry, semantic embedding and tool
+  post-processing moved back into `agents/generic_agent/agent.py`, so the agent owns its LangGraph logic. `common/`
+  keeps only agent-agnostic pieces (`LangGraphAgent` streaming, `MCPToolboxClient`, embedding provider,
+  `common/tool_calls.py`). The `mcp-toolbox` template is a copy of that graph with a no-op post-processing hook.

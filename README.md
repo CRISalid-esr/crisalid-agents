@@ -19,8 +19,8 @@ written per agent.
 2. **Framework** (`common/`)
 
     * The agent contract (`BaseAgent`: a stream of answer tokens, tool calls and tool results).
-    * Base classes doing the heavy lifting: `LangGraphAgent` (any `MessagesState` graph) and `MCPToolboxAgent`
-      (ReAct loop over an MCP Toolbox toolset).
+    * `LangGraphAgent`: turns any `MessagesState` graph into that event stream (lazy build, streaming).
+    * Shared clients and helpers: `MCPToolboxClient`, the embedding provider, the raw tool-call parser.
     * The registry discovering the agents, and the shared OpenWebUI pipeline code.
 
 3. **Interface adapters**
@@ -39,7 +39,7 @@ openwebui_pipelines/<name>_pipeline.py    chat_api/  POST /agents/{name}/chat  (
         common/registry  →  agents/<name>/agent.py : create_agent()
                      │
                      ▼
-        common/  BaseAgent · LangGraphAgent · MCPToolboxAgent
+        common/  BaseAgent · LangGraphAgent · MCPToolboxClient
                      │
                      ▼
         LangGraph workflow → LangChain tools / MCP Toolbox / CRISalid services / Neo4j
@@ -57,7 +57,7 @@ This generates:
 
 ```text
 agents/sorbobot/__init__.py
-agents/sorbobot/agent.py              # the only file with logic: a LangGraphAgent / MCPToolboxAgent subclass
+agents/sorbobot/agent.py              # the only file with logic: a LangGraphAgent subclass owning its graph
 agents/sorbobot/system_prompt.md
 agents/sorbobot/README.md
 openwebui_pipelines/sorbobot_pipeline.py   # Pipeline = make_pipeline("sorbobot")
@@ -68,9 +68,10 @@ Two templates exist:
 
 * `dummy` (default) — a minimal LangGraph ReAct loop with one local tool; `agents/dummy_agent/` is its checked-in
   rendering and the reference to read first.
-* `mcp-toolbox` — a ReAct agent over an MCP Toolbox toolset (like `generic_agent`): only the prompt, the
-  toolset (`<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET`, falling back to the `CRISALID_*` ones) and an
-  optional tool-output post-processing hook are written.
+* `mcp-toolbox` — a copy of the `generic_agent` graph (ReAct loop over an MCP Toolbox toolset, retry, semantic
+  parameter embedding, tool-output post-processing hook) with its own prompt and toolset
+  (`<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET`, falling back to the `CRISALID_*` ones). The graph code
+  is in the agent file, ready to be adapted.
 
 Options: `--no-openwebui` skips the pipeline stub, `--force` overwrites existing files.
 
@@ -363,7 +364,7 @@ CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
 
 * **`dummy_agent`** — the reference agent: a `LangGraphAgent` with one local tool (`count_words`). Read
   `agents/dummy_agent/agent.py` first; it is the checked-in rendering of the `dummy` scaffold template.
-* **`generic_agent`** — an `MCPToolboxAgent` that connects at runtime to an external MCP Toolbox server
+* **`generic_agent`** — a `LangGraphAgent` owning its ReAct loop; it connects at runtime to an external MCP Toolbox server
   (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
   system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
   set, it authenticates to the toolbox with a Keycloak service account (client credentials).
