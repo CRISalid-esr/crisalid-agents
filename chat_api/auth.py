@@ -4,10 +4,11 @@ Same scheme as crisalid-apollo: the ``x-api-key`` header is checked against the
 comma-separated ``API_KEYS`` env var, and the check is on unless
 ``ENABLE_API_KEYS`` is set to ``"false"``.
 
-The chat API is only reachable from the internal Docker network (never directly
-from the browser); proper end-user OIDC auth will be added later. Note the
-``KEYCLOAK_*`` env vars are unrelated: they are outbound-only (service account
-calling the MCP Toolbox, see ``crisalid_graph_agent.mcp_toolbox_client``).
+The chat API is only reachable from the internal Docker network (called by the
+sovisuplus backend, never directly from the browser); proper end-user OIDC auth
+will be added later. Note the ``KEYCLOAK_*`` env vars are unrelated: they are
+outbound-only (service account calling the MCP Toolbox, see
+``common.mcp_toolbox_client``).
 """
 
 import os

@@ -3,43 +3,101 @@
 LangChain / LangGraph agents connected to the CRISalid ecosystem.
 
 The goal of this project is to provide reusable Python agents that can interact with CRISalid services and data sources,
-while remaining independent from any single chat interface. Agents are currently exposed through two adapters — an
-OpenWebUI Pipeline and a FastAPI chat API for webapp frontends (MUI X Chat) — and can later be exposed through other
-interfaces such as LibreChat, a CLI, or background workers.
+while remaining independent from any single chat interface. Every agent is exposed through two generic adapters — an
+OpenWebUI Pipeline and a FastAPI chat API for webapp frontends (MUI X Chat, sovisuplus) — without any adapter code
+written per agent.
 
 ## Core idea
 
-`crisalid-agents` separates two concerns:
+`crisalid-agents` separates three concerns:
 
-1. **Core agents**
+1. **Agents** (`agents/<name>/`)
 
-    * Built with LangChain and LangGraph.
-    * Connected to CRISalid data sources such as Neo4j / IKG.
-    * Reusable from different frontends and execution contexts.
+    * Plain LangChain / LangGraph code and business logic, one package per agent.
+    * Connected to CRISalid data sources (MCP Toolbox over Neo4j / IKG, …).
 
-2. **Interface adapters**
+2. **Framework** (`common/`)
 
-    * Convert incoming data to the format expected by the agent.
-    * Two adapters exist: an OpenWebUI Pipeline (`openwebui_pipelines/`) and a FastAPI chat API (`chat_api/`).
+    * The agent contract (`BaseAgent`: a stream of answer tokens, tool calls and tool results).
+    * Base classes doing the heavy lifting: `LangGraphAgent` (any `MessagesState` graph) and `MCPToolboxAgent`
+      (ReAct loop over an MCP Toolbox toolset).
+    * The registry discovering the agents, and the shared OpenWebUI pipeline code.
 
-Current architecture:
+3. **Interface adapters**
+
+    * OpenWebUI Pipeline (`openwebui_pipelines/`, a two-line stub per agent) and the FastAPI chat API (`chat_api/`).
+    * Both serve every registered agent; the `AGENTS` env var restricts the set per deployment.
 
 ```text
-OpenWebUI                      Webapp (MUI X Chat)
-  │                              │
-  ▼                              ▼
-openwebui_pipelines/           chat_api/  (NDJSON streaming, port 9100)
-  │                              │
-  └──────────────┬───────────────┘
-                 ▼
-      core agents (neo4j_cypher_agent, crisalid_graph_agent)
-                 │
-                 ▼
-      LangGraph workflow
-                 │
-                 ▼
-      LangChain tools / MCP Toolbox / CRISalid services / Neo4j
+OpenWebUI                                 Webapp backend (sovisuplus, MUI X Chat)
+  │                                         │
+  ▼                                         ▼
+openwebui_pipelines/<name>_pipeline.py    chat_api/  POST /agents/{name}/chat  (NDJSON, port 9100)
+  │                                         │
+  └──────────────────┬──────────────────────┘
+                     ▼
+        common/registry  →  agents/<name>/agent.py : create_agent()
+                     │
+                     ▼
+        common/  BaseAgent · LangGraphAgent · MCPToolboxAgent
+                     │
+                     ▼
+        LangGraph workflow → LangChain tools / MCP Toolbox / CRISalid services / Neo4j
 ```
+
+## Creating a new agent
+
+```bash
+uv run python scripts/create_new_agent.py sorbobot \
+    --display-name "Sorbobot" --description "Answers questions about Sorbonne research" \
+    --template mcp-toolbox
+```
+
+This generates:
+
+```text
+agents/sorbobot/__init__.py
+agents/sorbobot/agent.py              # the only file with logic: a LangGraphAgent / MCPToolboxAgent subclass
+agents/sorbobot/system_prompt.md
+agents/sorbobot/README.md
+openwebui_pipelines/sorbobot_pipeline.py   # Pipeline = make_pipeline("sorbobot")
+tests/test_sorbobot.py                # offline smoke test
+```
+
+Two templates exist:
+
+* `dummy` (default) — a minimal LangGraph ReAct loop with one local tool; `agents/dummy_agent/` is its checked-in
+  rendering and the reference to read first.
+* `mcp-toolbox` — a ReAct agent over an MCP Toolbox toolset (like `crisalid_graph_agent`): only the prompt, the
+  toolset (`<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET`, falling back to the `CRISALID_*` ones) and an
+  optional tool-output post-processing hook are written.
+
+Options: `--no-openwebui` skips the pipeline stub, `--force` overwrites existing files.
+
+The agent is served as soon as its package exists under `agents/`: it appears in `GET /agents`, at
+`POST /agents/<name>/chat`, and as a model of the Pipelines server. Nothing else to register.
+
+### What an agent looks like
+
+```python
+class SorbobotAgent(LangGraphAgent):
+    def __init__(self, llm=None):
+        super().__init__(name="sorbobot", display_name="Sorbobot", description="…")
+        self._llm = llm
+
+    async def build_graph(self):
+        llm = self._llm or build_chat_model()
+        # … plain LangGraph: StateGraph(MessagesState), "agent" and "tools" nodes, edges …
+        return graph.compile()
+
+
+def create_agent(llm=None):
+    return SorbobotAgent(llm=llm)
+```
+
+`LangGraphAgent` turns the graph into the event stream both adapters consume (answer tokens, `ToolCall` emitted
+before the tool runs, `ToolResult` after). Agents that are not LangGraph-shaped subclass `common.agent.BaseAgent`
+directly and implement `astream()`.
 
 ## OpenWebUI Pipelines setup and Python dependency management
 
@@ -87,8 +145,9 @@ The resulting layout should be similar to:
 .
 ├── .openwebui-pipelines
 ├── .venv
-├── neo4j_cypher_agent
-├── other_awesome_agent
+├── agents
+├── chat_api
+├── common
 ├── openwebui_pipelines
 ├── pyproject.toml
 └── scripts
@@ -192,11 +251,11 @@ OpenWebUI may call the selected model for auxiliary tasks such as:
 These OpenWebUI-generated calls should be disabled in OpenWebUI settings while using CRISalid
 agent pipelines.
 
-## Running the agent as a chat API (webapp frontends)
+## Running the agents as a chat API (webapp frontends)
 
-The second adapter, `chat_api/`, exposes `crisalid_graph_agent` to webapp frontends built with MUI X Chat.
-`POST /chat` streams NDJSON message chunks (text deltas and tool invocations); `GET /health` is an unauthenticated
-health check.
+The second adapter, `chat_api/`, exposes every registered agent to webapp frontends built with MUI X Chat
+(sovisuplus). `POST /agents/{name}/chat` streams NDJSON message chunks (text deltas and tool invocations),
+`GET /agents` lists the served agents, and `GET /health` is an unauthenticated health check.
 
 ```bash
 uv run uvicorn chat_api.main:app --port 9100 --reload
@@ -217,7 +276,9 @@ API_KEYS="key1,another_key"
 Proper OIDC end-user authentication is planned for later.
 
 ```bash
-curl -N http://localhost:9100/chat \
+curl http://localhost:9100/agents -H "x-api-key: key1"
+
+curl -N http://localhost:9100/agents/crisalid_graph_agent/chat \
   -H "Content-Type: application/json" \
   -H "x-api-key: key1" \
   -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Who works on machine learning?"}]}}'
@@ -235,9 +296,18 @@ docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
 docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
-Both install the core dependencies from `uv.lock` and copy the core agent packages; only the chat-api image installs
-the `chat-api` extra. Runtime configuration is injected at deploy time through the env vars declared in each
-Dockerfile.
+Both install the core dependencies from `uv.lock` and ship every agent under `agents/`; only the chat-api image installs
+the `chat-api` extra. Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
+the agents a deployment serves.
+
+## Tests
+
+```bash
+uv run pytest
+```
+
+The suite is offline: agents are driven by a scripted fake chat model (`tests/fake_llm.py`) and both adapters are
+exercised end-to-end (event stream, OpenWebUI `<details>` blocks, NDJSON chunks, auth, scaffolder).
 
 ## Debugging in PyCharm
 
@@ -285,18 +355,15 @@ LLM_API_BASE=https://llm.ilaas.fr/v1
 MODEL=mistral-medium-250523
 API_KEY=...
 
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=...
+CRISALID_MCP_TOOLBOX_URL=http://127.0.0.1:5000
+CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
 ```
 
-## Core agents
+## Agents
 
-Two agents currently exist:
-
-* **`neo4j_cypher_agent`** — uses LangChain's Neo4j integration: it generates a Cypher query from the question, runs
-  it, and synthesizes a natural-language answer. The Cypher generation is guided by
-  `neo4j_cypher_agent/fewshot_examples.json`.
-* **`crisalid_graph_agent`** — a LangGraph ReAct agent that connects at runtime to an external MCP Toolbox server
-  (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`). When the
-  `KEYCLOAK_*` env vars are set, it authenticates to the toolbox with a Keycloak service account (client credentials).
+* **`dummy_agent`** — the reference agent: a `LangGraphAgent` with one local tool (`count_words`). Read
+  `agents/dummy_agent/agent.py` first; it is the checked-in rendering of the `dummy` scaffold template.
+* **`crisalid_graph_agent`** — an `MCPToolboxAgent` that connects at runtime to an external MCP Toolbox server
+  (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
+  system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
+  set, it authenticates to the toolbox with a Keycloak service account (client credentials).
