@@ -4,7 +4,7 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 
-from agents.crisalid_graph_agent.schema_postprocessor import compact_schema
+from agents.generic_agent.schema_postprocessor import compact_schema
 from common.mcp_toolbox_agent import MCPToolboxAgent
 
 # Must match the tool name as registered by the MCP toolbox server.
@@ -20,13 +20,13 @@ _TOOLSET_PROMPTS: dict[str, str] = {
 _DEFAULT_TOOLSET = "crisalid-restricted"
 
 
-class CrisalidGraphAgent(MCPToolboxAgent):
+class GenericAgent(MCPToolboxAgent):
     def __init__(self, llm: BaseChatModel | None = None):
         toolset = os.getenv("CRISALID_MCP_TOOLBOX_TOOLSET", _DEFAULT_TOOLSET)
         prompt_file = _TOOLSET_PROMPTS.get(toolset, _TOOLSET_PROMPTS[_DEFAULT_TOOLSET])
         super().__init__(
-            name="crisalid_graph_agent",
-            display_name="CRISalid Graph agent",
+            name="generic_agent",
+            display_name="Generic agent",
             description="Answers questions about the CRISalid institutional knowledge graph "
                         "(people, research units, publications) through the MCP Toolbox tools.",
             system_prompt=(_PROMPT_DIR / prompt_file).read_text(encoding="utf-8"),
@@ -46,5 +46,5 @@ class CrisalidGraphAgent(MCPToolboxAgent):
         return ToolMessage(content=compact, tool_call_id=message.tool_call_id, name=message.name, id=message.id)
 
 
-def create_agent(llm: BaseChatModel | None = None) -> CrisalidGraphAgent:
-    return CrisalidGraphAgent(llm=llm)
+def create_agent(llm: BaseChatModel | None = None) -> GenericAgent:
+    return GenericAgent(llm=llm)

@@ -14,10 +14,10 @@ Current layout (relevant parts):
 
 ```
 common/                 build_chat_model() (OpenAI-compatible LLM), embedding provider
-crisalid_graph_agent/   the one real agent: ReAct loop over MCP Toolbox tools
-                        (CrisalidGraphAgent: ainvoke / invoke / astream / stream / aclose)
+generic_agent/   the one real agent: ReAct loop over MCP Toolbox tools
+                        (GenericAgent: ainvoke / invoke / astream / stream / aclose)
 neo4j_cypher_agent/     legacy, considered junk — see open question Q6
-openwebui_pipelines/    crisalid_graph_agent_pipeline.py — OpenWebUI Pipelines adapter
+openwebui_pipelines/    generic_agent_pipeline.py — OpenWebUI Pipelines adapter
 chat_api/               FastAPI adapter streaming MUI X Chat NDJSON chunks (port 9100)
 docker/                 pipelines.Dockerfile (base ghcr.io/open-webui/pipelines, port 9099)
                         chat-api.Dockerfile  (base python:3.11-slim, port 9100)
@@ -25,7 +25,7 @@ scripts/                debug_openwebui_pipelines.py, debug_chat_api.py
 tests/                  test_schema_postprocessor.py only
 ```
 
-Both adapters are hard-wired to `CrisalidGraphAgent`. Everything a new agent would need
+Both adapters are hard-wired to `GenericAgent`. Everything a new agent would need
 (message conversion, the `str | tool_call | tool_result` event stream, `<details>` rendering
 for OpenWebUI, NDJSON chunking, lifespan, auth, Dockerfiles) lives inside those two
 adapter files and would have to be copy-pasted for each new agent.
@@ -64,7 +64,7 @@ Deliverables:
 1. A shared agent contract and the shared streaming/adaptation code, in `common/`.
 2. Generic adapters: the OpenWebUI pipeline layer and the chat API no longer import a
    specific agent; they discover agents through a registry.
-3. `crisalid_graph_agent` migrated onto the contract with no behaviour change.
+3. `generic_agent` migrated onto the contract with no behaviour change.
 4. A `dummy_agent` — minimal, heavily commented LangGraph agent used as the reference
    example for other teams and as the offline test fixture.
 5. A `scripts/create_new_agent.py` scaffolding script with a few options.
@@ -86,11 +86,11 @@ agents/                  one sub-package per agent (see Q1 for whether to move h
     agent.py             build_graph() + create_agent()  (~60 lines, commented)
     system_prompt.md
     README.md
-  crisalid_graph_agent/  moved from the top level, contents unchanged except the new contract
+  generic_agent/  moved from the top level, contents unchanged except the new contract
 openwebui_pipelines/
   _crisalid_pipeline.py  shared Pipeline base: message conversion, <details> rendering,
                          spinner status events, on_shutdown (NOT loaded as a pipeline: see Q3)
-  crisalid_graph_agent_pipeline.py    3-line stub -> make_pipeline("crisalid_graph_agent")
+  generic_agent_pipeline.py    3-line stub -> make_pipeline("generic_agent")
   dummy_agent_pipeline.py             3-line stub
 chat_api/
   main.py                generic app; agent(s) resolved through the registry
@@ -135,11 +135,11 @@ class BaseAgent(ABC):
 ```
 
 Using dataclasses instead of the current `dict["type"]` items keeps the adapters simple and
-lets tests assert on types. `crisalid_graph_agent.astream` currently yields dicts; migrate it.
+lets tests assert on types. `generic_agent.astream` currently yields dicts; migrate it.
 
 ## 5. `LangGraphAgent` (`common/langgraph_agent.py`)
 
-The ~100 lines of `CrisalidGraphAgent.astream` that translate `graph.astream(stream_mode=
+The ~100 lines of `GenericAgent.astream` that translate `graph.astream(stream_mode=
 ["messages","updates"], version="v2")` into events are generic to any `MessagesState` graph
 with an `agent` node and a `tools` node. Move them here:
 
@@ -169,7 +169,7 @@ class LangGraphAgent(BaseAgent):
   alternative — Python entry points — if agents will live in separate repositories).
 - `registry.get_agent(name) -> BaseAgent`: imports lazily, instantiates once, caches.
 - `AGENTS` env var (comma-separated, default: all discovered) restricts what an image serves.
-- `DEFAULT_AGENT` env var (default: `crisalid_graph_agent`) — used by the chat API `/chat`
+- `DEFAULT_AGENT` env var (default: `generic_agent`) — used by the chat API `/chat`
   route for backward compatibility.
 - Import failure of one agent must not take the whole registry down: log and skip, surface the
   error in `GET /agents` and in the pipeline `failed/` mechanism respectively.
@@ -232,7 +232,7 @@ uv run python scripts/create_new_agent.py <name> [--display-name "..."] [--descr
 - `--template dummy` (default): copy of the dummy agent with names substituted.
 - `--template mcp-toolbox`: ReAct agent over an MCP Toolbox toolset using
   `MCPToolboxClient` (env vars `<NAME>_MCP_TOOLBOX_URL` / `_TOOLSET`, falling back to the
-  CRISALID ones) — for teams whose agent is "crisalid_graph_agent with another prompt/toolset".
+  CRISALID ones) — for teams whose agent is "generic_agent with another prompt/toolset".
 - Generates: `agents/<name>/{__init__.py, agent.py, system_prompt.md, README.md}`,
   `openwebui_pipelines/<name>_pipeline.py` (unless `--no-openwebui`), a
   `tests/test_<name>.py` smoke test using the fake LLM.
@@ -278,7 +278,7 @@ uv run python scripts/create_new_agent.py <name> [--display-name "..."] [--descr
 
 ## 13. Constraints
 
-- No behaviour change for `crisalid_graph_agent` and for `POST /chat` (apollo contract).
+- No behaviour change for `generic_agent` and for `POST /chat` (apollo contract).
 - Core dependencies unchanged (`toolbox-langchain` stays core; nothing added for the scaffolder).
 - Small commits, one concern each, short messages, no trailers (user's git style).
 - Do not touch `neo4j_cypher_agent` beyond what Q6 decides.
@@ -286,7 +286,7 @@ uv run python scripts/create_new_agent.py <name> [--display-name "..."] [--descr
 
 ## 14. Decisions (answered 2026-09-05, implemented on this branch)
 
-- **Q1 Layout** — `crisalid_graph_agent/` moved under `agents/`; `agents/` is the single discovery root.
+- **Q1 Layout** — `generic_agent/` moved under `agents/`; `agents/` is the single discovery root.
 - **Q2 Location of other teams' agents** — same repository; registry scans `agents/*/agent.py`.
 - **Q3 OpenWebUI exposure** — one 3-line stub per agent (`Pipeline = make_pipeline("<name>")`).
 - **Q4 Chat API routing** — `POST /chat` removed; `POST /agents/{name}/chat` + `GET /agents`.
@@ -295,7 +295,7 @@ uv run python scripts/create_new_agent.py <name> [--display-name "..."] [--descr
 - **Q6 `neo4j_cypher_agent`** — deleted, with the disabled pipeline and the `langchain-neo4j` dependency.
 - **Q7 Scaffolder templates** — `dummy` and `mcp-toolbox`.
 - **Q8 Naming** — `common/` kept as the framework package; inheritance used where it removes boilerplate
-  (`BaseAgent` → `LangGraphAgent` → `MCPToolboxAgent` → `CrisalidGraphAgent`), nothing more.
+  (`BaseAgent` → `LangGraphAgent` → `MCPToolboxAgent` → `GenericAgent`), nothing more.
 
 Deviations from the design above, decided during implementation:
 
@@ -309,3 +309,6 @@ Deviations from the design above, decided during implementation:
 - The dummy agent is the rendering of the `dummy` template; `tests/test_create_new_agent.py` fails if they drift.
 - `pytest-asyncio` added to the dev group; `tests/fake_llm.py` provides a scripted chat model supporting tool calls
   and token streaming, so the whole suite runs offline.
+
+- **Rename (2026-09-05)** — `crisalid_graph_agent` renamed `generic_agent` (`GenericAgent`, display name "Generic agent",
+  stub `generic_agent_pipeline.py`); the OpenWebUI model id becomes `generic_agent_pipeline`.

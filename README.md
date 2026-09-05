@@ -68,7 +68,7 @@ Two templates exist:
 
 * `dummy` (default) — a minimal LangGraph ReAct loop with one local tool; `agents/dummy_agent/` is its checked-in
   rendering and the reference to read first.
-* `mcp-toolbox` — a ReAct agent over an MCP Toolbox toolset (like `crisalid_graph_agent`): only the prompt, the
+* `mcp-toolbox` — a ReAct agent over an MCP Toolbox toolset (like `generic_agent`): only the prompt, the
   toolset (`<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET`, falling back to the `CRISALID_*` ones) and an
   optional tool-output post-processing hook are written.
 
@@ -278,7 +278,7 @@ Proper OIDC end-user authentication is planned for later.
 ```bash
 curl http://localhost:9100/agents -H "x-api-key: key1"
 
-curl -N http://localhost:9100/agents/crisalid_graph_agent/chat \
+curl -N http://localhost:9100/agents/generic_agent/chat \
   -H "Content-Type: application/json" \
   -H "x-api-key: key1" \
   -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Who works on machine learning?"}]}}'
@@ -363,7 +363,7 @@ CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
 
 * **`dummy_agent`** — the reference agent: a `LangGraphAgent` with one local tool (`count_words`). Read
   `agents/dummy_agent/agent.py` first; it is the checked-in rendering of the `dummy` scaffold template.
-* **`crisalid_graph_agent`** — an `MCPToolboxAgent` that connects at runtime to an external MCP Toolbox server
+* **`generic_agent`** — an `MCPToolboxAgent` that connects at runtime to an external MCP Toolbox server
   (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
   system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
   set, it authenticates to the toolbox with a Keycloak service account (client credentials).

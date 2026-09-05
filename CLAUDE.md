@@ -69,7 +69,7 @@ once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI th
 - `agents/dummy_agent/` — reference agent: `LangGraphAgent` subclass with one local tool (`count_words`). It is the
   checked-in rendering of the `dummy` scaffold template (a test enforces they stay identical: regenerate with
   `create_new_agent.py dummy_agent --force ...` after editing the template).
-- `agents/crisalid_graph_agent/` — `MCPToolboxAgent` subclass over the `CRISALID_MCP_TOOLBOX_TOOLSET` toolset,
+- `agents/generic_agent/` — `MCPToolboxAgent` subclass over the `CRISALID_MCP_TOOLBOX_TOOLSET` toolset,
   prompt chosen per toolset, schema tool output compacted by `schema_postprocessor.py`.
 
 ### Adapters

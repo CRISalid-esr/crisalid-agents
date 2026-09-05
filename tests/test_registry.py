@@ -12,14 +12,14 @@ def fresh_registry():
 def test_discovers_agent_packages(fresh_registry):
     discovered = fresh_registry.discovered_agents()
     assert "dummy_agent" in discovered
-    assert "crisalid_graph_agent" in discovered
+    assert "generic_agent" in discovered
 
 
 def test_agents_env_var_restricts_available_agents(fresh_registry, monkeypatch):
     monkeypatch.setenv("AGENTS", "dummy_agent, not_an_agent")
     assert fresh_registry.available_agents() == ["dummy_agent"]
     with pytest.raises(UnknownAgentError):
-        fresh_registry.get_agent("crisalid_graph_agent")
+        fresh_registry.get_agent("generic_agent")
 
 
 def test_get_agent_instantiates_once(fresh_registry, monkeypatch):
