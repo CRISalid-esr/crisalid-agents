@@ -21,7 +21,7 @@ Configuration (env vars):
 What the framework provides (nothing to write per agent):
 
 - The event stream consumed by both adapters (`common/langgraph_agent.py`), the toolbox client
-  (`common/mcp_toolbox_client.py`), the embedding provider and the raw tool-call parser.
+  (`common/mcp_toolbox_client.py`), the `semantic_*` embedding helpers and the raw tool-call parser.
 - The OpenWebUI pipeline (`openwebui_pipelines/${name}_pipeline.py`) and the chat API route
   `POST /agents/$name/chat`.
 

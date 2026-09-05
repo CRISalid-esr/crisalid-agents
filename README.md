@@ -20,7 +20,7 @@ written per agent.
 
     * The agent contract (`BaseAgent`: a stream of answer tokens, tool calls and tool results).
     * `LangGraphAgent`: turns any `MessagesState` graph into that event stream (lazy build, streaming).
-    * Shared clients and helpers: `MCPToolboxClient`, the embedding provider, the raw tool-call parser.
+    * Shared, opt-in helpers: `MCPToolboxClient`, `semantic_*` parameter embedding, the raw tool-call parser.
     * The registry discovering the agents, and the shared OpenWebUI pipeline code.
 
 3. **Interface adapters**

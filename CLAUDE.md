@@ -59,7 +59,8 @@ once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI th
   `tools` nodes); translation of LangGraph stream parts into events is done here. Class attributes tune node names,
   an optional tool-result post-processing node, and argument suffixes hidden from UIs.
 - `common/mcp_toolbox_client.py` (toolset loading, optional Keycloak service-account auth), `common/embedding.py`
-  (embedding provider) and `common/tool_calls.py` (Mistral raw tool-call recovery, opt-in) are shared helpers.
+  (embedding provider) and `common/tool_calls.py` (Mistral raw tool-call recovery) and `common/semantic_params.py` (`semantic_*`
+  parameter embedding and vector stripping) are shared, opt-in helpers.
   They hold no graph logic: every agent owns its graph in `agents/<name>/agent.py`.
 - `common/registry.py` — discovers `agents/*/agent.py:create_agent()`; `AGENTS` env var restricts the served set.
   Instances are cached per process and closed on shutdown.

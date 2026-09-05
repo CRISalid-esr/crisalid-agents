@@ -317,3 +317,5 @@ Deviations from the design above, decided during implementation:
   post-processing moved back into `agents/generic_agent/agent.py`, so the agent owns its LangGraph logic. `common/`
   keeps only agent-agnostic pieces (`LangGraphAgent` streaming, `MCPToolboxClient`, embedding provider,
   `common/tool_calls.py`). The `mcp-toolbox` template is a copy of that graph with a no-op post-processing hook.
+- **Helpers (2026-09-05)** — `strip_vector_args` / `embed_semantic_params` factorized into `common/semantic_params.py`;
+  agents keep only the calls in their graph code.

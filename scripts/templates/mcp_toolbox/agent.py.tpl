@@ -17,61 +17,13 @@ from langgraph.graph.message import MessagesState
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from common.embedding import EmbeddingServiceError, get_embedding_provider
 from common.langgraph_agent import LangGraphAgent
 from common.llm import build_chat_model
 from common.mcp_toolbox_client import MCPToolboxClient
+from common.semantic_params import embed_semantic_params, strip_vector_args
 from common.tool_calls import fix_raw_tool_calls
 
 _SYSTEM_PROMPT = (Path(__file__).resolve().parent / "system_prompt.md").read_text(encoding="utf-8")
-
-
-def _strip_vector_args(messages):
-    # Embedding vectors are injected into tool calls at execution time only; they must not
-    # be replayed to the LLM in the conversation history.
-    result = []
-    for msg in messages:
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            cleaned = [
-                {**tc, "args": {k: v for k, v in tc["args"].items() if not k.endswith("_vector")}}
-                for tc in msg.tool_calls
-            ]
-            result.append(AIMessage(content=msg.content, tool_calls=cleaned))
-        else:
-            result.append(msg)
-    return result
-
-
-async def _embed_semantic_params(message: AIMessage) -> AIMessage:
-    # Convention of the CRISalid toolbox: a semantic_xxx parameter carries a natural-language
-    # string supplied by the LLM; it is embedded here and the vector is passed in the paired
-    # semantic_xxx_vector parameter (see MCPToolboxClient._validate_semantic_params).
-    if not message.tool_calls:
-        return message
-
-    needs_embedding = any(
-        any(k.startswith("semantic_") and not k.endswith("_vector") and isinstance(v, str)
-            for k, v in tc["args"].items())
-        for tc in message.tool_calls
-    )
-    if not needs_embedding:
-        return message
-
-    try:
-        provider = get_embedding_provider()
-        new_tool_calls = []
-        for tc in message.tool_calls:
-            new_args = dict(tc["args"])
-            for key, value in list(tc["args"].items()):
-                if key.startswith("semantic_") and not key.endswith("_vector") and isinstance(value, str):
-                    new_args[f"{key}_vector"] = await provider.embed_text(value)
-            new_tool_calls.append({**tc, "args": new_args})
-        return AIMessage(content=message.content, tool_calls=new_tool_calls)
-    except EmbeddingServiceError as exc:
-        return AIMessage(
-            content=f"Error: the embedding service is currently unavailable ({exc}). Please try again later.",
-            tool_calls=[],
-        )
 
 
 class $class_name(LangGraphAgent):
@@ -111,11 +63,11 @@ class $class_name(LangGraphAgent):
                 stop_after_attempt=3,
             )
             | RunnableLambda(fix_raw_tool_calls)
-            | RunnableLambda(_embed_semantic_params)
+            | RunnableLambda(embed_semantic_params)
         )
 
         async def call_model(state: MessagesState):
-            messages = _strip_vector_args(
+            messages = strip_vector_args(
                 [SystemMessage(content=self.system_prompt)] + state["messages"]
             )
             try:
