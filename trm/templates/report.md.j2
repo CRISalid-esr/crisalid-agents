@@ -1,0 +1,42 @@
+# Topic-to-Researcher Match — {{ run.cluster }}
+
+Run `{{ run.run_id }}` started {{ run.started_at }} — {{ run.topics | length }} topic(s), model `{{ run.settings.model }}`,
+min score {{ run.settings.min_score }}, max {{ run.settings.max_researchers }} researchers per topic.
+{% if run.errors %}
+**{{ run.errors | length }} topic(s) failed**: {% for e in run.errors %}`{{ e.topic_id }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}
+{% for topic in run.topics %}
+
+## {{ topic.topic_id }} — {{ topic.title }}
+
+{% if topic.call_id %}Call `{{ topic.call_id }}`{% endif %}{% if topic.deadlines %} — deadline(s) {{ topic.deadlines | join(', ') }}{% endif %}{% if topic.destination %} — {{ topic.destination }}{% endif %}
+{% if topic.error %}
+
+**Failed**: {{ topic.error }}
+{% else %}
+{% if topic.summary %}
+
+> {{ topic.summary }}
+
+{% endif %}
+Queries: {{ topic.queries | length }} — publications retrieved: {{ topic.publications_retrieved }} — candidates considered: {{ topic.candidates_considered }} — verified: {{ topic.candidates_verified }} — retained: {{ topic.researchers | length }}
+{% for w in topic.warnings %}
+- ⚠ {{ w }}
+{% endfor %}
+{% if not topic.researchers %}
+
+*No researcher above the threshold.*
+{% endif %}
+{% for r in topic.researchers %}
+
+### {{ loop.index }}. {{ r.name }} — score {{ '%.2f' | format(r.score) }} ({{ r.overall }})
+
+Pair id: `{{ r.pair_id }}`{% if r.units %} — {{ r.units | join('; ') }}{% endif %}
+
+{{ r.justification }}
+{% for p in r.publications if p.relevant %}
+- {{ p.title }}{% if p.year %} ({{ p.year }}){% endif %} — {{ p.reason }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endfor %}

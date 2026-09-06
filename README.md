@@ -298,7 +298,8 @@ docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
 Both install the core dependencies and the `topic-matching` extra from `uv.lock` and ship every agent under
-`agents/`; only the chat-api image installs the `chat-api` extra (and `scripts/`, for the batch entry points). Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
+`agents/`; only the chat-api image installs the `chat-api` and `trm` extras (plus `trm/` and `scripts/`, for the
+batch entry points). Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
 the agents a deployment serves.
 
 ## Horizon Europe topic index
@@ -329,6 +330,31 @@ Requires the `topic-matching` extra (`uv sync --extra chat-api --extra topic-mat
 requirements line) and the `EMBEDDING_*` service (bge-m3, `EMBEDDING_DIMENSIONS=1024` sizes the vector fields).
 Configuration: `HORIZON_WP_DIR`, `HORIZON_OS_URL`, `HORIZON_OS_USER` / `HORIZON_OS_PASSWORD`, `HORIZON_OS_INDEX`,
 `HORIZON_SEARCH_PIPELINE` (`horizon-hybrid-rrf` or `horizon-hybrid-minmax`).
+
+## Topic-to-Researcher Match (TRM)
+
+`trm/` matches every Horizon Europe topic of a cluster with the researchers of our laboratories, from their
+publications in the CRISalid knowledge graph. It is a batch run by an administrator, not a chat agent: for each topic
+the LLM (`TRM_MODEL`, dedicated) writes publication-like search queries in English and French, the toolbox tool
+`publications-by-theme` (with `internal_only`) retrieves matching publications of the laboratories' members, the
+candidates are ranked by reciprocal rank fusion over the queries, the LLM verifies each candidate's publications one
+by one, and the retained researchers are scored, normalised per topic and reported with a justification and a pair
+id (`<topic_id>|<person_uid>`) for later feedback.
+
+```bash
+uv run python scripts/topic_researcher_match.py --list-clusters
+uv run python scripts/topic_researcher_match.py --cluster CL2                       # one cluster
+uv run python scripts/topic_researcher_match.py --topic HORIZON-CL2-2026-01-HERITAGE-02   # one topic
+uv run python scripts/topic_researcher_match.py --all                               # every cluster
+# in the deployment: docker compose exec crisalid-agents-chat-api python scripts/topic_researcher_match.py --cluster CL2
+```
+
+Outputs per cluster in `TRM_OUTPUT_DIR` (`--out`): `trm-<cluster>-<date>.json` (source of truth, with the run
+parameters and per-topic errors), `.md`, and `.pdf` (WeasyPrint, `trm` extra; skipped with `--no-pdf` or when the
+library is missing). A failed topic is recorded and never aborts the cluster; `--cluster` / `--topic` allow cheap
+reruns. Tuning: `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`
+(`--min-score`, `--max-researchers`, `--max-candidates`, `--model` override them). Requires the topic index
+(`HORIZON_OS_*`), the embedding service and the MCP toolbox (`CRISALID_MCP_TOOLBOX_*`, Keycloak optional).
 
 ## Tests
 

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Topic-to-Researcher Match — {{ run.cluster }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; @bottom-center { content: "TRM {{ run.run_id }} — page " counter(page) " / " counter(pages); font-size: 9pt; color: #666; } }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 10.5pt; color: #222; line-height: 1.35; }
+  h1 { font-size: 20pt; margin: 0 0 4pt; }
+  h2 { font-size: 14pt; margin: 18pt 0 4pt; page-break-before: always; border-bottom: 1px solid #999; padding-bottom: 3pt; }
+  h2.first { page-break-before: auto; }
+  h3 { font-size: 11.5pt; margin: 12pt 0 3pt; }
+  .meta { color: #555; font-size: 9.5pt; }
+  .summary { border-left: 3px solid #bbb; padding-left: 8pt; color: #333; margin: 6pt 0; }
+  .stats { font-size: 9.5pt; color: #444; }
+  .warn { color: #a05a00; font-size: 9.5pt; }
+  .error { color: #a00; }
+  .pair { font-family: monospace; font-size: 9pt; color: #555; }
+  .score { display: inline-block; background: #eef; border-radius: 3pt; padding: 0 5pt; font-weight: bold; }
+  ul { margin: 3pt 0 6pt 14pt; padding: 0; }
+  li { margin-bottom: 2pt; }
+  .none { font-style: italic; color: #666; }
+</style>
+</head>
+<body>
+<h1>Topic-to-Researcher Match — {{ run.cluster }}</h1>
+<p class="meta">Run {{ run.run_id }} started {{ run.started_at }} — {{ run.topics | length }} topic(s), model {{ run.settings.model }},
+min score {{ run.settings.min_score }}, max {{ run.settings.max_researchers }} researchers per topic.
+{% if run.errors %}<br><span class="error">{{ run.errors | length }} topic(s) failed: {% for e in run.errors %}{{ e.topic_id }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</p>
+{% for topic in run.topics %}
+<h2{% if loop.first %} class="first"{% endif %}>{{ topic.topic_id }} — {{ topic.title }}</h2>
+<p class="meta">{% if topic.call_id %}Call {{ topic.call_id }}{% endif %}{% if topic.deadlines %} — deadline(s) {{ topic.deadlines | join(', ') }}{% endif %}{% if topic.destination %} — {{ topic.destination }}{% endif %}</p>
+{% if topic.error %}
+<p class="error">Failed: {{ topic.error }}</p>
+{% else %}
+{% if topic.summary %}<p class="summary">{{ topic.summary }}</p>{% endif %}
+<p class="stats">Queries: {{ topic.queries | length }} — publications retrieved: {{ topic.publications_retrieved }} — candidates considered: {{ topic.candidates_considered }} — verified: {{ topic.candidates_verified }} — retained: {{ topic.researchers | length }}</p>
+{% for w in topic.warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
+{% if not topic.researchers %}<p class="none">No researcher above the threshold.</p>{% endif %}
+{% for r in topic.researchers %}
+<h3>{{ loop.index }}. {{ r.name }} <span class="score">{{ '%.2f' | format(r.score) }}</span> <span class="meta">({{ r.overall }})</span></h3>
+<p class="pair">{{ r.pair_id }}</p>
+{% if r.units %}<p class="meta">{{ r.units | join('; ') }}</p>{% endif %}
+<p>{{ r.justification }}</p>
+<ul>
+{% for p in r.publications if p.relevant %}
+<li>{{ p.title }}{% if p.year %} ({{ p.year }}){% endif %} — {{ p.reason }}</li>
+{% endfor %}
+</ul>
+{% endfor %}
+{% endif %}
+{% endfor %}
+</body>
+</html>
