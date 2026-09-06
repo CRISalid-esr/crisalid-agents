@@ -2,6 +2,7 @@
 
 import re
 from datetime import date
+from difflib import SequenceMatcher
 
 from trm.config import TRMSettings
 from trm.models import Candidate, Publication, ResearcherMatch, Verification
@@ -45,6 +46,26 @@ def rank_publications(results: dict[str, list[dict]], rank_constant: int) -> dic
     return publications
 
 
+DUPLICATE_TITLE_RATIO = 0.9
+
+
+def _normalised_title(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+
+def dedupe_publications(pubs: list[Publication]) -> list[Publication]:
+    """Drop near-identical titles (the same work harvested twice), keeping the best-scored one."""
+    kept: list[Publication] = []
+    for pub in sorted(pubs, key=lambda p: -p.score):
+        title = _normalised_title(pub.title)
+        if title and any(
+            SequenceMatcher(None, title, _normalised_title(k.title)).ratio() >= DUPLICATE_TITLE_RATIO for k in kept
+        ):
+            continue
+        kept.append(pub)
+    return kept
+
+
 def build_candidates(publications: dict[str, Publication], settings: TRMSettings) -> list[Candidate]:
     by_person: dict[str, list[Publication]] = {}
     names: dict[str, str] = {}
@@ -54,7 +75,7 @@ def build_candidates(publications: dict[str, Publication], settings: TRMSettings
             names.setdefault(c["uid"], c["name"])
     candidates = []
     for uid, pubs in by_person.items():
-        pubs = sorted(pubs, key=lambda p: -p.score)
+        pubs = dedupe_publications(pubs)
         pre_score = sum(p.score for p in pubs[:settings.top_publications_for_prescore])
         candidates.append(Candidate(person_uid=uid, name=names[uid], publications=pubs, pre_score=pre_score))
     candidates.sort(key=lambda c: -c.pre_score)

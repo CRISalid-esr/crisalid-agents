@@ -12,7 +12,7 @@ from trm.llm import LLMJsonError, StructuredLLM, flatten_queries, parse_json_obj
 from trm.models import Candidate, Publication, RunResult, TopicResult, Verification, PublicationVerdict
 from trm.pipeline import build_graph, run_topic
 from trm.report import render_html, render_markdown, write_reports
-from trm.scoring import build_candidates, final_matches, publication_year, rank_publications, recency_weight
+from trm.scoring import build_candidates, dedupe_publications, final_matches, publication_year, rank_publications, recency_weight
 from trm.sources import internal_only_filter, unit_label
 
 SETTINGS = TRMSettings(model="test-model", max_queries=6, max_candidates=3, min_score=0.35, max_researchers=2,
@@ -57,6 +57,18 @@ def test_build_candidates_sums_the_best_publications_only():
 def test_build_candidates_caps_the_number_of_candidates():
     results = {"q": [_row(f"p{i}", 0.9, [f"r{i}"]) for i in range(10)]}
     assert len(build_candidates(rank_publications(results, 60), SETTINGS)) == SETTINGS.max_candidates
+
+
+def test_dedupe_publications_drops_near_identical_titles():
+    pubs = [
+        Publication("p1", "The artist-enterprise in the digital age", None, 2016, 1.0, [], score=0.5),
+        Publication("p2", "The artist-enterprise in a digital age", None, 2016, 1.0, [], score=0.6),
+        Publication("p3", "Financing French start-ups", None, 2016, 1.0, [], score=0.4),
+    ]
+    assert [p.uid for p in dedupe_publications(pubs)] == ["p2", "p3"]
+    results = {"q": [_row("p1", 0.9, ["a"], title="Same title"), _row("p2", 0.8, ["a"], title="Same title"), _row("p3", 0.7, ["a"], title="Different work")]}
+    a = build_candidates(rank_publications(results, 60), SETTINGS)[0]
+    assert [p.uid for p in a.publications] == ["p1", "p3"]
 
 
 def test_recency_and_year_parsing():
