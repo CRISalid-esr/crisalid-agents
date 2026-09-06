@@ -20,6 +20,10 @@ chat-api = [
     "uvicorn>=0.52.4",
     "python-dotenv>=1.0",
 ]
+topic-matching = [
+    "opensearch-py[async]>=2.8",
+    "pypdf>=6.0",
+]
 
 [dependency-groups]
 dev = [
@@ -30,3 +34,4 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["opensearch: integration tests needing a live OpenSearch (skipped by default)"]

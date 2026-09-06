@@ -4,3 +4,4 @@ __pycache__/
 openwebui_pipelines/**/valves.json
 .idea
 data/
+reports/

@@ -297,9 +297,38 @@ docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
 docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
-Both install the core dependencies from `uv.lock` and ship every agent under `agents/`; only the chat-api image installs
-the `chat-api` extra. Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
+Both install the core dependencies and the `topic-matching` extra from `uv.lock` and ship every agent under
+`agents/`; only the chat-api image installs the `chat-api` extra (and `scripts/`, for the batch entry points). Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
 the agents a deployment serves.
+
+## Horizon Europe topic index
+
+`common/horizon/` builds and queries an OpenSearch index of Horizon Europe work programme (WP) topics, one document
+per topic, with hybrid search (BM25 + dense vectors on the whole topic and on its section-level passages, fused by
+reciprocal rank fusion). It feeds the topic-matching features (topic-to-researcher batch, Horizon topic finder agent).
+
+```bash
+# 1. Local OpenSearch (≥ 2.19, k-NN and neural-search plugins are in the default image)
+docker compose -f docker/docker-compose.dev.yaml up -d
+
+# 2. Work programme PDFs of the current programme in HORIZON_WP_DIR (git-ignored), one PDF per cluster part
+ls data/cff/he/2026-27/
+
+# 3. Parse only (no OpenSearch needed), then index
+uv run python scripts/index_horizon_topics.py --dry-run --issues
+uv run python scripts/index_horizon_topics.py --recreate --report reports/ingest.json
+```
+
+The index mirrors the directory: each run stamps the topics it finds with a run id and, after a complete run, deletes
+the topics of files that are no longer there (previous programme). A topic is re-embedded only when its source file,
+the parser version or the embedding model changed, so reruns are cheap and an interrupted run can simply be started
+again. `--file <pdf>` indexes one file without the stale sweep; the report lists parse warnings and errors with file
+and page numbers, and the script exits non-zero on errors only.
+
+Requires the `topic-matching` extra (`uv sync --extra chat-api --extra topic-matching`, then the pipelines
+requirements line) and the `EMBEDDING_*` service (bge-m3, `EMBEDDING_DIMENSIONS=1024` sizes the vector fields).
+Configuration: `HORIZON_WP_DIR`, `HORIZON_OS_URL`, `HORIZON_OS_USER` / `HORIZON_OS_PASSWORD`, `HORIZON_OS_INDEX`,
+`HORIZON_SEARCH_PIPELINE` (`horizon-hybrid-rrf` or `horizon-hybrid-minmax`).
 
 ## Tests
 

@@ -87,8 +87,9 @@ employment condition applies.
   requires every package under `agents/` to expose `create_agent()`, so the TRM batch lives outside `agents/`.
 - `common/mcp_toolbox_client.py` — TRM calls the toolbox tools programmatically (no LLM tool calling).
 - `scripts/create_new_agent.py` — PTM is scaffolded with it (`dummy` template: LangGraph loop with local tools).
-- `pypdf` (already in the venv, BSD licence) for PDF text extraction. Its `layout` extraction mode is used for the
-  specific-conditions table (keeps the two columns apart), the default mode for prose.
+- `pypdf` (BSD licence) for PDF text extraction, default mode. Its output varies between versions (spaces inserted
+  before hyphens, page-number line glued to the first body line, split dot leaders): every raw line is normalised
+  before pattern matching, and the parser is validated on the six real files (`uv run pytest --run-pdf`).
 
 Layout of the new code:
 

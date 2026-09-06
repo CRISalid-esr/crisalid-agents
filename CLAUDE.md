@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Install dependencies (run both — uv sync resets the venv and wipes the pipelines extras)
-uv sync --extra chat-api
+uv sync --extra chat-api --extra topic-matching
 uv pip install -r .openwebui-pipelines/requirements.txt
 
 # Tests (offline: agents are driven by a scripted fake chat model)
@@ -20,6 +20,11 @@ uv run python scripts/create_new_agent.py <name> [--template dummy|mcp-toolbox] 
 
 # Debug Pipelines server in IDE (PyCharm)
 uv run python scripts/debug_openwebui_pipelines.py
+
+# Horizon topic index: local OpenSearch, then parse-only check and ingestion of HORIZON_WP_DIR
+docker compose -f docker/docker-compose.dev.yaml up -d
+uv run python scripts/index_horizon_topics.py --dry-run --issues
+uv run python scripts/index_horizon_topics.py --recreate
 
 # Run chat API (MUI X Chat NDJSON streaming endpoint)
 uv run uvicorn chat_api.main:app --port 9100 --reload
@@ -43,6 +48,7 @@ LangGraph code and business logic; adapters, streaming, discovery and Docker pac
 
 ```
 common/                ← framework: agent contract, LangGraph/MCP Toolbox base classes, registry, adapters' shared code
+common/horizon/        ← Horizon Europe WP topic index: PDF parser, OpenSearch mapping, ingestion, hybrid search
 agents/<name>/         ← one package per agent (agent.py with create_agent(), system_prompt.md, README.md)
 openwebui_pipelines/   ← one two-line stub per agent: Pipeline = make_pipeline("<name>")
 chat_api/              ← FastAPI: GET /agents, POST /agents/{name}/chat (MUI X Chat NDJSON, port 9100)
@@ -64,6 +70,16 @@ once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI th
   They hold no graph logic: every agent owns its graph in `agents/<name>/agent.py`.
 - `common/registry.py` — discovers `agents/*/agent.py:create_agent()`; `AGENTS` env var restricts the served set.
   Instances are cached per process and closed on shutdown.
+
+### Horizon topic index (`common/horizon/`)
+
+`wp_parser.py` turns a work programme part PDF (pypdf text) into `Topic` objects: cover → TOC (destinations) → call
+overview tables (call id, dates, expected projects) → topic blocks (`TOPIC-ID: title`, `Call:`, specific conditions,
+Expected Outcome, Scope) with section-level passages. `mapping.py` (index + RRF/min-max search pipelines),
+`ingest.py` (`HorizonIngester`: idempotent bulk indexing keyed on file hash / parser version / embedding model, stale
+sweep after a complete run) and `search.py` (`HorizonSearch`: hybrid query, multi-query RRF fusion, cluster listing).
+Driven by `scripts/index_horizon_topics.py`. Deps in the `topic-matching` extra (`opensearch-py`, `pypdf`);
+`docker/docker-compose.dev.yaml` runs a local OpenSearch.
 
 ### Agents
 
@@ -109,6 +125,9 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 | `KEYCLOAK_CLIENT_SECRET` | Service account client secret (outbound toolbox auth) |
 | `KEYCLOAK_SSL_VERIFY` | Set to `false` to skip TLS verification (local dev with self-signed certs) |
 | `EMBEDDING_*` | Embedding service used for `semantic_*` tool parameters (see `.env.sample`) |
+| `HORIZON_WP_DIR` | Directory of the current programme's work programme PDFs (default `data/cff/he/2026-27`) |
+| `HORIZON_OS_URL`, `HORIZON_OS_USER`, `HORIZON_OS_PASSWORD` | OpenSearch endpoint of the Horizon topic index |
+| `HORIZON_OS_INDEX`, `HORIZON_SEARCH_PIPELINE` | Index name (`horizon-topics`) and search pipeline (`horizon-hybrid-rrf` / `horizon-hybrid-minmax`) |
 | `ENABLE_API_KEYS` | Chat API inbound auth toggle; on unless set to `false` |
 | `API_KEYS` | Comma-separated valid values for the chat API `x-api-key` header |
 
@@ -118,7 +137,8 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 - LangGraph graphs are built manually with `StateGraph` + `ToolNode` — do not use `create_react_agent`.
 - New agents are created with `scripts/create_new_agent.py`; they must not import from `openwebui_pipelines/` or
   `chat_api/`, and adapters must not import a specific agent (go through `common.registry`).
-- Use `uv run pytest`; tests never call a real LLM (see `tests/fake_llm.py`).
+- Use `uv run pytest`; tests never call a real LLM (see `tests/fake_llm.py`) nor a real OpenSearch (fake client in
+  `tests/test_horizon_ingest.py`); `uv run pytest --run-pdf` additionally parses the real PDFs of `HORIZON_WP_DIR`.
 
 ## Neo4j / Cypher Reference
 

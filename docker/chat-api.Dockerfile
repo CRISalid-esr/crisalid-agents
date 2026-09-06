@@ -7,9 +7,10 @@ WORKDIR /app
 # Install uv for locked dependency resolution
 RUN pip install uv --quiet
 
-# Install project runtime deps + the chat-api extra (fastapi, uvicorn)
+# Install project runtime deps + the chat-api extra (fastapi, uvicorn) + the topic-matching extra
+# (opensearch-py, pypdf: Horizon topic index ingestion and search)
 COPY pyproject.toml uv.lock ./
-RUN uv export --no-dev --frozen --extra chat-api -q > /tmp/requirements.txt && \
+RUN uv export --no-dev --frozen --extra chat-api --extra topic-matching -q > /tmp/requirements.txt && \
     uv pip install --system -r /tmp/requirements.txt --no-cache-dir && \
     rm /tmp/requirements.txt
 
@@ -17,6 +18,8 @@ RUN uv export --no-dev --frozen --extra chat-api -q > /tmp/requirements.txt && \
 COPY common/ ./common/
 COPY agents/ ./agents/
 COPY chat_api/ ./chat_api/
+# Batch entry points (Horizon topic index ingestion) run with `docker compose exec … python scripts/<name>.py`
+COPY scripts/ ./scripts/
 
 # Runtime configuration is injected at deploy time (Docker Compose / K8s); no defaults are set
 # here so that a missing variable causes a visible failure rather than silent misconfiguration.
@@ -25,6 +28,7 @@ COPY chat_api/ ./chat_api/
 #                           exposed on the internal Docker network
 #   MODEL / API_KEY / LLM_API_BASE                     LLM endpoint
 #   CRISALID_MCP_TOOLBOX_URL / CRISALID_MCP_TOOLBOX_TOOLSET, KEYCLOAK_*, EMBEDDING_*   see README
+#   HORIZON_WP_DIR / HORIZON_OS_URL / HORIZON_OS_INDEX / HORIZON_SEARCH_PIPELINE   Horizon topic index
 ENV AGENTS="" \
     ENABLE_API_KEYS="true"
 
