@@ -107,6 +107,11 @@ per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluste
   toolset, schema tool output compacted by `schema_postprocessor.py`. The `mcp-toolbox` scaffold template is a copy of
   this graph with a no-op post-processing hook.
 
+- `agents/project_topic_matching/` — Horizon topic finder (PTM): `dummy`-style ReAct loop whose three local tools
+  (`search_horizon_topics`, `get_horizon_topic`, `list_horizon_clusters`) wrap `common.horizon.search.HorizonSearch`;
+  the OpenSearch client is opened lazily in `build_graph()` and closed in `aclose()`. `create_agent(llm=…, search=…)`
+  accepts a fake search for tests. Needs `HORIZON_OS_*` and `EMBEDDING_*` at runtime.
+
 ### Adapters
 
 - OpenWebUI: `common/openwebui.py` holds the whole pipeline (message conversion, `<details>` tool blocks with

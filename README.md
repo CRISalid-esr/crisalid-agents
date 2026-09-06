@@ -419,6 +419,11 @@ CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
 
 * **`dummy_agent`** — the reference agent: a `LangGraphAgent` with one local tool (`count_words`). Read
   `agents/dummy_agent/agent.py` first; it is the checked-in rendering of the `dummy` scaffold template.
+* **`project_topic_matching`** — the Horizon topic finder (PTM): a `LangGraphAgent` with three local tools over the
+  Horizon Europe topic index (`common/horizon/`, `HORIZON_OS_*`). From a project description it writes 3–5 English
+  queries, runs one hybrid search per query and presents the best-fitting work programme topics with call, deadlines,
+  EU contribution and the passage that matches; follow-up questions read the full topic text. See
+  `agents/project_topic_matching/README.md`.
 * **`generic_agent`** — a `LangGraphAgent` owning its ReAct loop; it connects at runtime to an external MCP Toolbox server
   (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
   system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
