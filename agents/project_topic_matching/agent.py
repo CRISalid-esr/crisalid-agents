@@ -7,10 +7,11 @@ the event streaming and the discovery are provided by ``common/``.
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import MessagesState
@@ -18,9 +19,10 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from common.embedding import get_embedding_provider
-from common.horizon.client import HorizonSettings, build_client
+from common.horizon.client import HorizonSettings, LoopBoundOpenSearch
 from common.horizon.models import TopicHit
 from common.horizon.search import HorizonSearch
+from common.agent import AgentEvent
 from common.langgraph_agent import LangGraphAgent
 from common.llm import build_chat_model
 
@@ -102,17 +104,26 @@ class ProjectTopicMatchingAgent(LangGraphAgent):
             display_name="Horizon topic finder",
             description="Finds the Horizon Europe work programme topics that best fit a project idea.",
         )
-        # An injected model and search allow offline tests; otherwise the OpenSearch client is opened lazily.
+        # An injected model and search allow offline tests; otherwise the OpenSearch client is opened lazily,
+        # once per event loop (OpenWebUI runs every turn in a new loop) and closed at the end of each turn.
         self._llm = llm
         self._search = search
-        self._client = None
+        self._client: LoopBoundOpenSearch | None = None
 
     async def _get_search(self) -> HorizonSearch:
         if self._search is None:
             settings = HorizonSettings.from_env()
-            self._client = build_client(settings)
+            self._client = LoopBoundOpenSearch(settings)
             self._search = HorizonSearch(self._client, get_embedding_provider(), settings)
         return self._search
+
+    async def astream(self, messages: list[BaseMessage]) -> AsyncIterator[AgentEvent]:
+        try:
+            async for event in super().astream(messages):
+                yield event
+        finally:
+            if self._client is not None:
+                await self._client.close()
 
     async def build_graph(self) -> CompiledStateGraph:
         # Called once, on first use: opens the OpenSearch connection.
@@ -140,7 +151,6 @@ class ProjectTopicMatchingAgent(LangGraphAgent):
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.close()
-            self._client = None
 
 
 def create_agent(llm: BaseChatModel | None = None, search: HorizonSearch | None = None) -> ProjectTopicMatchingAgent:

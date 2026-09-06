@@ -1,5 +1,6 @@
 """OpenSearch connection settings and client factory for the Horizon topic index."""
 
+import asyncio
 import os
 from dataclasses import dataclass
 
@@ -34,3 +35,36 @@ def build_client(settings: HorizonSettings | None = None):
     if settings.user:
         kwargs["http_auth"] = (settings.user, settings.password or "")
     return AsyncOpenSearch(**kwargs)
+
+
+class LoopBoundOpenSearch:
+    """An ``AsyncOpenSearch`` proxy that opens one client per running event loop.
+
+    The OpenWebUI adapter drives agents through ``BaseAgent.stream``, which runs every turn in a fresh event loop
+    and closes it afterwards; an aiohttp session created during the first turn is then unusable ("Event loop is
+    closed"). This proxy creates the client on first use in each loop and ``close()`` releases the current loop's
+    client, so callers close it at the end of every turn (see ``ProjectTopicMatchingAgent.astream``).
+    """
+
+    def __init__(self, settings: HorizonSettings | None = None, factory=None):
+        self.settings = settings or HorizonSettings.from_env()
+        self._factory = factory or build_client
+        self._clients: dict[asyncio.AbstractEventLoop, object] = {}
+
+    def _current(self):
+        loop = asyncio.get_running_loop()
+        client = self._clients.get(loop)
+        if client is None:
+            # Drop the clients of loops that are gone (they cannot be closed any more).
+            self._clients = {l: c for l, c in self._clients.items() if not l.is_closed()}
+            client = self._factory(self.settings)
+            self._clients[loop] = client
+        return client
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+    async def close(self) -> None:
+        client = self._clients.pop(asyncio.get_running_loop(), None)
+        if client is not None:
+            await client.close()

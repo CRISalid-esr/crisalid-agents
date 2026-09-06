@@ -87,3 +87,55 @@ def test_hit_excerpt_is_truncated_at_a_word_boundary():
     text = data["best_matching_passage"]["text"]
     assert text.endswith("…") and len(text) <= 402 and " word…" in text
     assert hit_to_dict(_hit("T", 1.0, None))["best_matching_passage"]["text"] == ""
+
+
+def test_opensearch_client_is_bound_to_each_turn_event_loop(monkeypatch):
+    """OpenWebUI drives agents through the sync bridge: a new event loop per turn, closed afterwards."""
+    import asyncio
+
+    from agents.project_topic_matching import agent as agent_module
+    from common.horizon.client import LoopBoundOpenSearch
+    from common.horizon.search import HorizonSearch
+
+    created = []
+
+    class FakeClient:
+        def __init__(self):
+            self.loop = asyncio.get_running_loop()
+            self.closed = False
+            created.append(self)
+
+        async def search(self, index, body, params=None):
+            assert asyncio.get_running_loop() is self.loop and not self.loop.is_closed()
+            if "aggs" in body:
+                return {"aggregations": {"clusters": {"buckets": []}}}
+            return {"hits": {"hits": []}}
+
+        async def close(self):
+            self.closed = True
+
+    class FakeEmbedder:
+        async def embed_text(self, text):
+            return [1.0]
+
+    monkeypatch.setenv("HORIZON_OS_URL", "http://unused:9200")
+    original = agent_module.LoopBoundOpenSearch
+    monkeypatch.setattr(agent_module, "LoopBoundOpenSearch",
+                        lambda settings: original(settings, factory=lambda s: FakeClient()))
+    monkeypatch.setattr(agent_module, "get_embedding_provider", lambda: FakeEmbedder())
+
+    llm = ScriptedChatModel(
+        responses=[
+            tool_call_message("search_horizon_topics", {"query": "q1"}, "call-1"), AIMessage(content="A1"),
+            tool_call_message("search_horizon_topics", {"query": "q2"}, "call-2"), AIMessage(content="A2"),
+        ],
+        calls=[],
+    )
+    agent = create_agent(llm=llm)
+    first = list(agent.stream([HumanMessage(content="turn 1")]))
+    second = list(agent.stream([HumanMessage(content="turn 1"), AIMessage(content="A1"), HumanMessage(content="turn 2")]))
+
+    assert [e for e in first if isinstance(e, str)] and "".join(e for e in second if isinstance(e, str)) == "A2"
+    assert all(isinstance(e, (ToolCall, ToolResult, str)) for e in second)
+    assert json.loads([e for e in second if isinstance(e, ToolResult)][0].result) == []
+    assert len(created) == 2 and created[0].loop is not created[1].loop and all(c.closed for c in created)
