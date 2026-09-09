@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from crisalid_graph_agent.schema_postprocessor import (
+from agents.generic_agent.schema_postprocessor import (
     _compact_types,
     _filter_properties,
     _format_count,

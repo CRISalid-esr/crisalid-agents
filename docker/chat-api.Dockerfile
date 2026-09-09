@@ -1,4 +1,4 @@
-# FastAPI chat API wrapper image (MUI X Chat NDJSON streaming endpoint).
+# FastAPI chat API wrapper image (MUI X Chat NDJSON streaming, one route per agent under agents/).
 # Build from the repository root: docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 FROM python:3.11-slim
 
@@ -13,28 +13,20 @@ RUN uv export --no-dev --frozen --extra chat-api -q > /tmp/requirements.txt && \
     uv pip install --system -r /tmp/requirements.txt --no-cache-dir && \
     rm /tmp/requirements.txt
 
-# Copy project source packages
+# Project source packages
 COPY common/ ./common/
-COPY crisalid_graph_agent/ ./crisalid_graph_agent/
+COPY agents/ ./agents/
 COPY chat_api/ ./chat_api/
 
-# Declare runtime env vars — values must be injected at deploy time (Docker Compose / K8s).
-# No defaults are set here so that a missing variable causes a visible failure rather than
-# silent misconfiguration.
-# Inbound auth: API_KEYS / ENABLE_API_KEYS (same scheme as crisalid-apollo); the service
-# must only be exposed on the internal Docker network.
-# KEYCLOAK_* vars are outbound-only (service account calling the MCP Toolbox).
-ENV MODEL="" \
-    API_KEY="" \
-    LLM_API_BASE="" \
-    CRISALID_MCP_TOOLBOX_URL="" \
-    CRISALID_MCP_TOOLBOX_TOOLSET="" \
-    ENABLE_API_KEYS="true" \
-    API_KEYS="" \
-    KEYCLOAK_ISSUER="" \
-    KEYCLOAK_CLIENT_ID="" \
-    KEYCLOAK_CLIENT_SECRET="" \
-    KEYCLOAK_SSL_VERIFY="true"
+# Runtime configuration is injected at deploy time (Docker Compose / K8s); no defaults are set
+# here so that a missing variable causes a visible failure rather than silent misconfiguration.
+#   AGENTS                  comma-separated agents to serve (default: all under agents/)
+#   ENABLE_API_KEYS / API_KEYS   inbound auth (x-api-key header); the service must only be
+#                           exposed on the internal Docker network
+#   MODEL / API_KEY / LLM_API_BASE                     LLM endpoint
+#   CRISALID_MCP_TOOLBOX_URL / CRISALID_MCP_TOOLBOX_TOOLSET, KEYCLOAK_*, EMBEDDING_*   see README
+ENV AGENTS="" \
+    ENABLE_API_KEYS="true"
 
 EXPOSE 9100
 
