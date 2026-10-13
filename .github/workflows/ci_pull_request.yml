@@ -24,7 +24,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra chat-api
+        run: uv sync --extra chat-api --extra topic-matching --extra trm
 
       - name: Test with pytest
         run: uv run pytest
