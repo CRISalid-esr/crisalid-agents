@@ -297,9 +297,64 @@ docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
 docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
-Both install the core dependencies from `uv.lock` and ship every agent under `agents/`; only the chat-api image installs
-the `chat-api` extra. Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
+Both install the core dependencies and the `topic-matching` extra from `uv.lock` and ship every agent under
+`agents/`; only the chat-api image installs the `chat-api` and `trm` extras (plus `trm/` and `scripts/`, for the
+batch entry points). Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
 the agents a deployment serves.
+
+## Horizon Europe topic index
+
+`common/horizon/` builds and queries an OpenSearch index of Horizon Europe work programme (WP) topics, one document
+per topic, with hybrid search (BM25 + dense vectors on the whole topic and on its section-level passages, fused by
+reciprocal rank fusion). It feeds the topic-matching features (topic-to-researcher batch, Horizon topic finder agent).
+
+```bash
+# 1. Local OpenSearch (≥ 2.19, k-NN and neural-search plugins are in the default image)
+docker compose -f docker/docker-compose.dev.yaml up -d
+
+# 2. Work programme PDFs of the current programme in HORIZON_WP_DIR (git-ignored), one PDF per cluster part
+ls data/cff/he/2026-27/
+
+# 3. Parse only (no OpenSearch needed), then index
+uv run python scripts/index_horizon_topics.py --dry-run --issues
+uv run python scripts/index_horizon_topics.py --recreate --report reports/ingest.json
+```
+
+The index mirrors the directory: each run stamps the topics it finds with a run id and, after a complete run, deletes
+the topics of files that are no longer there (previous programme). A topic is re-embedded only when its source file,
+the parser version or the embedding model changed, so reruns are cheap and an interrupted run can simply be started
+again. `--file <pdf>` indexes one file without the stale sweep; the report lists parse warnings and errors with file
+and page numbers, and the script exits non-zero on errors only.
+
+Requires the `topic-matching` extra (`uv sync --extra chat-api --extra topic-matching`, then the pipelines
+requirements line) and the `EMBEDDING_*` service (bge-m3, `EMBEDDING_DIMENSIONS=1024` sizes the vector fields).
+Configuration: `HORIZON_WP_DIR`, `HORIZON_OS_URL`, `HORIZON_OS_USER` / `HORIZON_OS_PASSWORD`, `HORIZON_OS_INDEX`,
+`HORIZON_SEARCH_PIPELINE` (`horizon-hybrid-rrf` or `horizon-hybrid-minmax`).
+
+## Topic-to-Researcher Match (TRM)
+
+`trm/` matches every Horizon Europe topic of a cluster with the researchers of our laboratories, from their
+publications in the CRISalid knowledge graph. It is a batch run by an administrator, not a chat agent: for each topic
+the LLM (`TRM_MODEL`, dedicated) writes publication-like search queries in English and French, the toolbox tool
+`publications-by-theme` (with `internal_only`) retrieves matching publications of the laboratories' members, the
+candidates are ranked by reciprocal rank fusion over the queries, the LLM verifies each candidate's publications one
+by one, and the retained researchers are scored, normalised per topic and reported with a justification and a pair
+id (`<topic_id>|<person_uid>`) for later feedback.
+
+```bash
+uv run python scripts/topic_researcher_match.py --list-clusters
+uv run python scripts/topic_researcher_match.py --cluster CL2                       # one cluster
+uv run python scripts/topic_researcher_match.py --topic HORIZON-CL2-2026-01-HERITAGE-02   # one topic
+uv run python scripts/topic_researcher_match.py --all                               # every cluster
+# in the deployment: docker compose exec crisalid-agents-chat-api python scripts/topic_researcher_match.py --cluster CL2
+```
+
+Outputs per cluster in `TRM_OUTPUT_DIR` (`--out`): `trm-<cluster>-<date>.json` (source of truth, with the run
+parameters and per-topic errors), `.md`, and `.pdf` (WeasyPrint, `trm` extra; skipped with `--no-pdf` or when the
+library is missing). A failed topic is recorded and never aborts the cluster; `--cluster` / `--topic` allow cheap
+reruns. Tuning: `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`
+(`--min-score`, `--max-researchers`, `--max-candidates`, `--model` override them). Requires the topic index
+(`HORIZON_OS_*`), the embedding service and the MCP toolbox (`CRISALID_MCP_TOOLBOX_*`, Keycloak optional).
 
 ## Tests
 
@@ -364,6 +419,11 @@ CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
 
 * **`dummy_agent`** — the reference agent: a `LangGraphAgent` with one local tool (`count_words`). Read
   `agents/dummy_agent/agent.py` first; it is the checked-in rendering of the `dummy` scaffold template.
+* **`project_topic_matching`** — the Horizon topic finder (PTM): a `LangGraphAgent` with three local tools over the
+  Horizon Europe topic index (`common/horizon/`, `HORIZON_OS_*`). From a project description it writes 3–5 English
+  queries, runs one hybrid search per query and presents the best-fitting work programme topics with call, deadlines,
+  EU contribution and the passage that matches; follow-up questions read the full topic text. See
+  `agents/project_topic_matching/README.md`.
 * **`generic_agent`** — a `LangGraphAgent` owning its ReAct loop; it connects at runtime to an external MCP Toolbox server
   (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
   system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
