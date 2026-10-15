@@ -1,13 +1,14 @@
 """Sorbobot: research expertise of Sorbonne University over the CRISalid graph.
 
-The graph is the ReAct loop of the framework (agent → tools → agent). The LLM only sees the business tools of
-``tools.py``; each runs a deterministic search over crisalid-taxi and the ``sorbobot`` MCP toolset. Nothing is
-stored between requests: the adapters send the whole conversation with every message.
+The graph is the ReAct loop of the framework (agent -> tools -> agent). The LLM only sees the business tools of
+``tools.py``; each runs a deterministic search over crisalid-taxi and the ``sorbobot`` MCP toolset.
 """
 
+import logging
 import os
 from pathlib import Path
 
+import openai
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
@@ -26,6 +27,8 @@ from common.langgraph_agent import LangGraphAgent
 from common.llm import build_chat_model
 from common.mcp_toolbox_client import MCPToolboxClient
 from common.tool_calls import fix_raw_tool_calls
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "system_prompt.md"
 
@@ -100,6 +103,10 @@ class SorbobotAgent(LangGraphAgent):
             except ValueError:
                 # The model returned an empty stream (e.g. transient API error).
                 return {"messages": [AIMessage(content="The model returned an empty response. Please try again.")]}
+            except openai.APIError as exc:
+                logger.warning("The language model call failed: %s", exc)
+                message = f"Error: the language model is currently unavailable ({exc.message}). Please try again later."
+                return {"messages": [AIMessage(content=message)]}
 
         def should_continue(state: MessagesState):
             if state["messages"][-1].tool_calls:

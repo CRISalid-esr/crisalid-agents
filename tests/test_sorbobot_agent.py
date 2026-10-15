@@ -4,6 +4,8 @@ import re
 import threading
 from pathlib import Path
 
+import httpx
+import openai
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -55,6 +57,22 @@ def test_topics_without_documents_are_explained_to_the_llm(tool_name):
 
     assert tool_result(events)["error"] == "No document of the database is linked to the topics found."
 
+
+class BusyChatModel(ScriptedChatModel):
+    def _next(self, messages):
+        request = httpx.Request("POST", "https://llm.test/v1/chat/completions")
+        raise openai.InternalServerError(
+            "Error code: 503 - model is busy", response=httpx.Response(503, request=request), body=None
+        )
+
+
+def test_an_unavailable_language_model_is_reported_to_the_user():
+    agent = create_agent(llm=BusyChatModel(responses=[], calls=[]), services=make_services())
+
+    answer = "".join(event for event in agent.stream([HumanMessage(content="A question")]) if isinstance(event, str))
+
+    assert answer.startswith("Error: the language model is currently unavailable")
+    assert "503" in answer
 
 
 def test_the_sorbobot_toolset_is_loaded_by_default(monkeypatch):
