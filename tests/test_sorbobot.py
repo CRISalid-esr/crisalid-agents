@@ -1,4 +1,4 @@
-from agents.sorbobot.agent import create_agent
+from agents.sorbobot.agent import SYSTEM_PROMPT_FILE, create_agent
 
 
 def test_sorbobot_is_configured():
@@ -7,4 +7,4 @@ def test_sorbobot_is_configured():
 
     assert agent.name == "sorbobot"
     assert agent.display_name == "Sorbobot"
-    assert agent.system_prompt.strip()
+    assert SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
