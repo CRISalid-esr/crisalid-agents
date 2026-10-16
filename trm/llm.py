@@ -94,6 +94,7 @@ def flatten_queries(data: dict, topic: dict, max_queries: int) -> list[str]:
 
 async def expand_topic(llm: StructuredLLM, topic: dict, settings: TRMSettings) -> Expansion:
     prompt = EXPANSION_PROMPT.substitute(
+        programme=settings.programme_label,
         topic_id=topic.get("topic_id", ""),
         title=topic.get("title", ""),
         destination=topic.get("destination") or "",
@@ -119,10 +120,12 @@ async def verify_candidate(
     llm: StructuredLLM, topic: dict, summary: str, candidate: Candidate, settings: TRMSettings
 ) -> Verification:
     prompt = VERIFICATION_PROMPT.substitute(
+        programme=settings.programme_label,
         topic_id=topic.get("topic_id", ""),
         title=topic.get("title", ""),
         summary=summary,
-        expected_outcome=(topic.get("expected_outcome") or "")[:2500],
+        # Some programmes (ERC, EIC) only describe a scope.
+        expected_outcome=(topic.get("expected_outcome") or topic.get("scope") or "")[:2500],
         name=candidate.name,
         publications=_publication_lines(candidate, settings),
     )

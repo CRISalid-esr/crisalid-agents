@@ -29,6 +29,8 @@ uv run python scripts/index_horizon_topics.py --recreate
 # Topic-to-Researcher Match batch (needs TRM_MODEL, the topic index, the embedding service and the MCP toolbox)
 uv run python scripts/topic_researcher_match.py --list-clusters
 uv run python scripts/topic_researcher_match.py --cluster CL2 [--topic ID] [--out DIR]
+# … or on the calls of any programme given as topics files (e.g. exported by Druid), no OpenSearch needed
+uv run python scripts/topic_researcher_match.py --topics-file calls-eic-pathfinder.json [--out DIR]
 
 # Run chat API (MUI X Chat NDJSON streaming endpoint)
 uv run uvicorn chat_api.main:app --port 9100 --reload
@@ -93,7 +95,8 @@ four nodes over injected services: `llm.py` (single-shot JSON prompts `expansion
 `verification_prompt.md`, `StructuredLLM` with JSON retries), `sources.py` (`ToolboxResearcherSource`: programmatic
 `publications-by-theme` with `internal_only` — filtered client-side when the toolbox lacks the parameter — and
 `get-person-memberships`), `scoring.py` (pure functions: RRF over queries × best cosine, top-5 pre-score, recency,
-per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluster from the OpenSearch index and
+per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluster from the OpenSearch index (or of a
+topics file, `load_topics_file`: one run per file, its `programme_label` named in the prompts) and
 `report.py` renders JSON / Markdown / PDF (Jinja2 templates in `trm/templates/`, WeasyPrint in the `trm` extra).
 `TRM_MODEL` is required; every `TRM_*` setting is in `trm/config.py`.
 
@@ -150,6 +153,7 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 | `HORIZON_OS_URL`, `HORIZON_OS_USER`, `HORIZON_OS_PASSWORD` | OpenSearch endpoint of the Horizon topic index |
 | `HORIZON_OS_INDEX`, `HORIZON_SEARCH_PIPELINE` | Index name (`horizon-topics`) and search pipeline (`horizon-hybrid-rrf` / `horizon-hybrid-minmax`) |
 | `TRM_MODEL` | Dedicated model of the topic-to-researcher batch (required by `scripts/topic_researcher_match.py`) |
+| `TRM_PROGRAMME_LABEL` | Programme named in the TRM prompts (default `the Horizon Europe work programme`; a topics file overrides it) |
 | `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`, `TRM_OUTPUT_DIR` | TRM tuning (defaults 10 / 25 / 0.35 / 15 / 4 / `reports`) |
 | `ENABLE_API_KEYS` | Chat API inbound auth toggle; on unless set to `false` |
 | `API_KEYS` | Comma-separated valid values for the chat API `x-api-key` header |
