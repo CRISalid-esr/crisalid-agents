@@ -1,7 +1,9 @@
 """Run the TRM pipeline over the topics of one or several clusters and write the reports."""
 
+import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +31,33 @@ async def select_topics(search: HorizonSearch, cluster: str | None, topic_ids: l
             topics.append(topic)
         return topics
     return [topic async for topic in search.iter_topics(cluster)]
+
+
+@dataclass
+class TopicsFile:
+    """Topics given as a file instead of the OpenSearch index: the calls of any programme, exported by Druid
+    (`export_calls.cjs`, format ``druid-calls/1``) or written by hand, in the fields of ``Topic.to_document``."""
+
+    label: str  # becomes the ``cluster`` of the run, hence the stem of its reports
+    programme_label: str | None
+    topics: list[dict]
+
+
+def load_topics_file(path: Path) -> TopicsFile:
+    """Reads a topics file: an object ``{subset, programme_label, topics: [...]}`` or a bare list of topics. A topic
+    needs a ``topic_id`` and a ``title``; its ``cluster`` defaults to the label of the file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    meta = data if isinstance(data, dict) else {}
+    rows = meta.get("topics") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise ValueError(f"{path}: no topic list")
+    label = str(meta.get("subset") or meta.get("cluster") or path.stem)
+    topics = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict) or not row.get("topic_id") or not row.get("title"):
+            raise ValueError(f"{path}: topic {index} needs a topic_id and a title")
+        topics.append({**row, "cluster": row.get("cluster") or label, "deadlines": list(row.get("deadlines") or [])})
+    return TopicsFile(label=label, programme_label=meta.get("programme_label") or None, topics=topics)
 
 
 async def run_cluster(

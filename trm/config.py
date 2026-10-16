@@ -27,6 +27,8 @@ class TRMSettings:
     llm_retries: int = 2
     recency: tuple[tuple[int, float], ...] = field(default=((5, 1.0), (10, 0.6)))  # (max age in years, weight)
     recency_floor: float = 0.3
+    # Named in the prompts: the programme the topics come from (a topics file may name another one).
+    programme_label: str = "the Horizon Europe work programme"
 
     @classmethod
     def from_env(cls, **overrides) -> "TRMSettings":
@@ -40,6 +42,7 @@ class TRMSettings:
             concurrency=int(env.get("TRM_CONCURRENCY", "4")),
             output_dir=Path(env.get("TRM_OUTPUT_DIR", "reports")),
             contributor_roles=parse_roles(env.get("TRM_CONTRIBUTOR_ROLES", "aut,ctb")),
+            programme_label=env.get("TRM_PROGRAMME_LABEL") or cls.programme_label,
         )
         return replace(settings, **{k: v for k, v in overrides.items() if v is not None})
 
@@ -50,4 +53,5 @@ class TRMSettings:
             "contributor_roles": list(self.contributor_roles),
             "publications_per_candidate": self.publications_per_candidate,
             "top_publications_for_prescore": self.top_publications_for_prescore, "rank_constant": self.rank_constant,
+            "programme_label": self.programme_label,
         }
