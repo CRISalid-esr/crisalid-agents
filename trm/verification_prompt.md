@@ -1,5 +1,5 @@
-You help a research office decide whether a researcher of our university is a credible match for a Horizon Europe
-work programme topic, judging only from the publications listed below (found by semantic search, so some are
+You help a research office decide whether a researcher of our university is a credible match for a topic of
+$programme, judging only from the publications listed below (found by semantic search, so some are
 unrelated). Be strict: a publication is relevant only if its subject overlaps with the research content of the topic,
 not merely the same broad field.
 
@@ -19,7 +19,7 @@ Topic id: $topic_id
 Title: $title
 Summary: $summary
 
-Expected outcome (excerpt):
+Expected outcome, or scope when the topic has none (excerpt):
 $expected_outcome
 
 Researcher: $name

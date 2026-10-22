@@ -283,3 +283,53 @@ def test_pdf_report_smoke(tmp_path):
     paths = write_reports(_run(), tmp_path, pdf=True)
     assert "pdf" in paths and paths["pdf"].stat().st_size > 1000
     assert paths["pdf"].read_bytes().startswith(b"%PDF")
+
+
+# ----------------------------------------------------------------------------- topics files and programme label
+
+def test_load_topics_file_reads_an_export_and_a_bare_list(tmp_path):
+    from trm.runner import load_topics_file
+
+    export = tmp_path / "calls-eic-pathfinder.json"
+    export.write_text(json.dumps({
+        "format": "druid-calls/1", "programme": "eic", "programme_label": "EIC — European Innovation Council",
+        "subset": "Pathfinder",
+        "topics": [{"topic_id": "HORIZON-EIC-2026-PATHFINDERCHALLENGES-01-01", "title": "Energy harvesting", "cluster": "",
+                    "deadlines": ["2026-10-28"], "expected_outcome": "", "scope": "Scope."}],
+    }), encoding="utf-8")
+    file = load_topics_file(export)
+    assert file.label == "Pathfinder" and file.programme_label == "EIC — European Innovation Council"
+    assert file.topics[0]["cluster"] == "Pathfinder" and file.topics[0]["deadlines"] == ["2026-10-28"]
+
+    bare = tmp_path / "my-calls.json"
+    bare.write_text(json.dumps([{"topic_id": "X-1", "title": "T", "cluster": "AXIS-1"}]), encoding="utf-8")
+    file = load_topics_file(bare)
+    assert file.label == "my-calls" and file.programme_label is None
+    assert file.topics == [{"topic_id": "X-1", "title": "T", "cluster": "AXIS-1", "deadlines": []}]
+
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps({"topics": [{"title": "no id"}]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="topic_id"):
+        load_topics_file(broken)
+
+
+async def test_prompts_name_the_programme_and_fall_back_to_the_scope():
+    rows = {"creative startups": [_row("p1", 0.9, ["anna"])]}
+    llm = ScriptedChatModel(responses=[AIMessage(content=EXPANSION), AIMessage(content=_verdict({"p1": True}, "strong"))], calls=[])
+    settings = TRMSettings(model="m", max_candidates=1, min_score=0.0, concurrency=1, programme_label="the ERC Starting Grants")
+    graph = build_graph(StructuredLLM(llm), FakeEmbedder(), FakeSource(rows, {}), settings)
+    topic = {**TOPIC, "expected_outcome": "", "scope": "Frontier research on creative entrepreneurship."}
+    result = await run_topic(graph, topic)
+
+    assert result.error is None
+    expansion, verification = (str(call[-1].content) for call in llm.calls)
+    assert "a topic of\nthe ERC Starting Grants." in expansion and "Horizon Europe" not in expansion
+    assert "the ERC Starting Grants" in verification
+    assert "Frontier research on creative entrepreneurship." in verification
+
+
+def test_settings_default_programme_label(monkeypatch):
+    assert TRMSettings(model="m").programme_label == "the Horizon Europe work programme"
+    monkeypatch.setenv("TRM_PROGRAMME_LABEL", "the AAPG of the ANR")
+    settings = TRMSettings.from_env()
+    assert settings.programme_label == "the AAPG of the ANR" and settings.to_dict()["programme_label"] == "the AAPG of the ANR"
