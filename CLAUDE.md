@@ -112,6 +112,14 @@ per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluste
   the OpenSearch client is opened lazily in `build_graph()` and closed in `aclose()`. `create_agent(llm=…, search=…)`
   accepts a fake search for tests. Needs `HORIZON_OS_*` and `EMBEDDING_*` at runtime.
 
+- `agents/sorbobot/` — research expertise over the CRISalid graph (spec in `specs/22-sorbobot-implementation/`):
+  `dummy`-style loop whose four local tools (`find_domain_experts`, `get_person_expertise`, `get_researcher_profile`,
+  `explore_domains`) run deterministic searches over crisalid-taxi (`taxi.py`) and the `sorbobot` MCP toolset
+  (`toolbox.py`, one client per event loop) with LLM judges (`judges.py`) and a pure ranking (`ranking.py`). The LLM
+  passes the answer language in every tool call; the `agent` node answers input-control, technical-error and LLM
+  failures itself from `locales/<lang>.json` (`i18n.py`). `create_agent(llm=…, settings=…, taxi=…, toolbox=…)` takes
+  fakes for tests (`tests/sorbobot_fakes.py`). Needs `CRISALID_TAXI_URL` at runtime.
+
 ### Adapters
 
 - OpenWebUI: `common/openwebui.py` holds the whole pipeline (message conversion, `<details>` tool blocks with
@@ -149,6 +157,8 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 | `HORIZON_WP_DIR` | Directory of the current programme's work programme PDFs (default `data/cff/he/2026-27`) |
 | `HORIZON_OS_URL`, `HORIZON_OS_USER`, `HORIZON_OS_PASSWORD` | OpenSearch endpoint of the Horizon topic index |
 | `HORIZON_OS_INDEX`, `HORIZON_SEARCH_PIPELINE` | Index name (`horizon-topics`) and search pipeline (`horizon-hybrid-rrf` / `horizon-hybrid-minmax`) |
+| `CRISALID_TAXI_URL` | crisalid-taxi base URL (required by `sorbobot`) |
+| `SORBOBOT_*` | Sorbobot tuning: timeouts, taxi request, thresholds, sibling widening, ranking method, result sizes, languages (see `.env.sample`) |
 | `TRM_MODEL` | Dedicated model of the topic-to-researcher batch (required by `scripts/topic_researcher_match.py`) |
 | `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`, `TRM_OUTPUT_DIR` | TRM tuning (defaults 10 / 25 / 0.35 / 15 / 4 / `reports`) |
 | `ENABLE_API_KEYS` | Chat API inbound auth toggle; on unless set to `false` |
