@@ -161,6 +161,10 @@ For a summary:
 
 **Other contributions**
 - <theme>: <what it is about> [9]
+
+**References**
+[1] <title> (<year>)
+[3] ...
 ```
 
 One sentence on the main themes, then one bold section per role present, in the order publications (role `author`),
@@ -172,7 +176,10 @@ the domains in plain words, without path or tag. At most 220 words.
 For a specific question: one to three sentences that answer it, each ending with its references, for example
 `... [2] [4]`. If the publications do not allow an answer, say so.
 
-Only the references of the tool result (`[1]`, `[2]`...) may be cited.
+Only the references of the tool result (`[1]`, `[2]`...) may be cited. Both for a summary and for a specific question,
+end the answer with a bold **References** heading followed by every reference you cited, one per line, in numerical
+order: `[n] <title> (<year>)`, title and year exactly as the tool returns them. This list is not counted in the 220
+words.
 
 ### Domains (`explore_domains`)
 

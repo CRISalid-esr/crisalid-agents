@@ -697,6 +697,10 @@ For a summary:
 
 **Other contributions**
 - <theme>: <what it is about> [9]
+
+**References**
+[1] <title> (<year>)
+[3] …
 ```
 
 For a specific question:
@@ -710,6 +714,9 @@ For a specific question:
   and end with their references.
 - For a specific question: 1 to 3 sentences. If the publications do not allow an answer, say so.
 - The references are those of the tool result (`[1]`, `[2]`…); no other may be cited.
+- For a summary and for a specific question, the answer ends with a bold **References** heading listing every cited
+  reference, one per line, in numerical order: `[n] <title> (<year>)`, title and year as the tool returns them. This
+  list is not counted in the 220 words.
 - An absent role has no section, no heading and no sentence saying there is nothing.
 - A supervised thesis or a talk is never presented as a publication of the researcher.
 - Domains are named in plain words, without path or tag. 220 words at most.
