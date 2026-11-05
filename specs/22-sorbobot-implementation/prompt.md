@@ -636,8 +636,7 @@ two catalogues. They must be merged.
   tool called during the current turn.
 - If the tool returns nothing, say so.
 - The conversational answer is written in the language determined at the start of the turn, section headings
-  included. The following stay in their original form: people's names, publication titles, taxonomy paths and
-  formulas. Predefined messages displayed directly by the code go through the i18n service (§8).
+  included. The following stay in their original form: people's names, publication titles and taxonomy paths. Predefined messages displayed directly by the code go through the i18n service (§8).
 - No institution name: we speak of experts found in the CRISalid knowledge graph.
 - The layout is produced by the LLM, from the templates of the system prompt below. The templates are written in
   English in the prompt; the LLM translates them into the detected language.
@@ -659,9 +658,17 @@ Here are the most relevant researchers:
 <ranking block>
 ```
 
-The ranking block explains the method: a bold heading, the formula alone on its line, then one bullet per symbol,
-written by the LLM in the user's language. The formulas (for `weighted_relevance` and for `count`) are given in the
-prompt and copied verbatim. No list of publications and no closing question.
+The ranking block explains the method in plain words: a bold heading, then one sentence written by the LLM in the
+user's language, chosen by `ranking_method` from the prompt. No formula and no symbol is displayed: the score is
+computed by the code (§6.3), and a formula is unreadable in a chat interface. The sentences are:
+
+- `weighted_relevance`: "The score, out of 100, favours researchers who have many publications closely related to
+  the subject, recent ones counting more, and whose work focuses on this subject rather than spreading over many
+  others."
+- `count`: "The score, out of 100, compares the number of publications each researcher has on the subject with that
+  of the researcher who has the most."
+
+No list of publications and no closing question.
 
 ### 7.3 A researcher's expertise
 
