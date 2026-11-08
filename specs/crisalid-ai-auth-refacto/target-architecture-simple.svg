@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="820" viewBox="0 0 1120 820" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2937">
+  <title>End-user identity from the chat clients to the MCP tools — simplified target architecture</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-dashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/>
+    </marker>
+    <style>
+      .box { stroke-width: 1.5; rx: 8; }
+      .client { fill: #eff6ff; stroke: #3b82f6; }
+      .service { fill: #f0fdf4; stroke: #16a34a; }
+      .store { fill: #fdf4ff; stroke: #a855f7; }
+      .idp { fill: #fffbeb; stroke: #d97706; }
+      .edge { fill: #f9fafb; stroke: #9ca3af; }
+      .t { font-weight: 700; font-size: 14px; }
+      .s { font-size: 12px; }
+      .lbl { font-size: 12px; fill: #374151; }
+      .lblh { font-size: 12.5px; font-weight: 700; fill: #111827; }
+      .small { font-size: 11px; fill: #4b5563; }
+      .flow { stroke: #374151; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+      .kc { stroke: #6b7280; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow-dashed); }
+      .kc2 { stroke: #6b7280; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow-dashed); marker-start: url(#arrow-dashed); }
+    </style>
+  </defs>
+
+  <rect width="1120" height="820" fill="#ffffff"/>
+
+  <text x="60" y="42" font-size="20" font-weight="700">End-user identity from the chat clients to the MCP tools</text>
+
+  <!-- Browser -->
+  <rect x="305" y="75" width="240" height="56" class="box edge"/>
+  <text x="425" y="99" text-anchor="middle" class="t">Browser</text>
+  <text x="425" y="118" text-anchor="middle" class="s">signed-in person</text>
+
+  <path d="M425 131 V160 H230 V193" class="flow"/>
+  <path d="M425 131 V160 H620 V193" class="flow"/>
+  <text x="290" y="155" class="small">session cookie</text>
+  <text x="470" y="155" class="small">session cookie</text>
+
+  <!-- Chat clients -->
+  <rect x="60" y="195" width="340" height="66" class="box client"/>
+  <text x="230" y="220" text-anchor="middle" class="t">SoVisu+</text>
+  <text x="230" y="241" text-anchor="middle" class="s">keeps the access and refresh tokens (NextAuth)</text>
+
+  <rect x="450" y="195" width="340" height="66" class="box client"/>
+  <text x="620" y="220" text-anchor="middle" class="t">OpenWebUI 0.13</text>
+  <text x="620" y="241" text-anchor="middle" class="s">connection auth type: System OAuth</text>
+
+  <!-- Clients → chat API -->
+  <path d="M230 261 V368" class="flow"/>
+  <text x="242" y="300" class="lblh">POST /agents/{name}/chat</text>
+  <text x="242" y="318" class="lbl">Bearer access token</text>
+  <text x="242" y="336" class="lbl">audience crisalid-agents</text>
+
+  <path d="M620 261 V368" class="flow"/>
+  <text x="632" y="300" class="lblh">POST /v1/chat/completions</text>
+  <text x="632" y="318" class="lbl">Bearer access token</text>
+  <text x="632" y="336" class="lbl">audience crisalid-agents</text>
+
+  <!-- Chat API -->
+  <rect x="60" y="370" width="730" height="120" class="box service"/>
+  <text x="76" y="394" class="t">crisalid-agents chat API</text>
+  <text x="76" y="418">1. Validate the access token (issuer, audience crisalid-agents, expiry, JWKS)</text>
+  <text x="76" y="438">2. Check the allow list of the calling client (azp claim)</text>
+  <text x="76" y="458">3. Token exchange → delegated access token with audience crisalid-graph-mcp</text>
+  <text x="76" y="478">4. Run the agent with that token bound to the request</text>
+
+  <!-- Chat API → toolbox -->
+  <path d="M425 490 V578" class="flow"/>
+  <text x="437" y="525" class="lblh">header crisalid-keycloak_token</text>
+  <text x="437" y="543" class="lbl">delegated access token, audience crisalid-graph-mcp</text>
+
+  <!-- MCP toolbox -->
+  <rect x="60" y="580" width="730" height="80" class="box service"/>
+  <text x="76" y="604" class="t">MCP toolbox</text>
+  <text x="76" y="626">Every tool requires the token</text>
+  <text x="76" y="646">get-current-person binds username to the preferred_username claim, hidden from the LLM</text>
+
+  <!-- Toolbox → Neo4j -->
+  <path d="M425 660 V718" class="flow"/>
+  <text x="437" y="693" class="lbl">Cypher scoped by the token identity</text>
+
+  <!-- Neo4j -->
+  <rect x="305" y="720" width="240" height="56" class="box store"/>
+  <text x="425" y="744" text-anchor="middle" class="t">Neo4j</text>
+  <text x="425" y="763" text-anchor="middle" class="s">institutional knowledge graph</text>
+
+  <!-- Keycloak -->
+  <rect x="870" y="195" width="200" height="465" class="box idp"/>
+  <text x="970" y="220" text-anchor="middle" class="t">Keycloak</text>
+  <text x="970" y="240" text-anchor="middle" class="s">realm crisalid-inst</text>
+  <text x="970" y="258" text-anchor="middle" class="s">one public issuer</text>
+
+  <text x="884" y="300" class="s" font-weight="700">Clients</text>
+  <text x="884" y="318" class="s">sovisuplus, open-webui</text>
+  <text x="884" y="336" class="s">crisalid-agents (confidential,</text>
+  <text x="884" y="354" class="s">token exchange, service account)</text>
+  <text x="884" y="372" class="s">crisalid-graph-mcp (resource server)</text>
+
+  <text x="884" y="410" class="s" font-weight="700">Audience scopes</text>
+  <text x="884" y="428" class="s">crisalid-agents → web clients</text>
+  <text x="884" y="446" class="s">crisalid-graph-mcp → crisalid-agents</text>
+
+  <text x="884" y="484" class="s" font-weight="700">Access token lifespan</text>
+  <text x="884" y="502" class="s">15 min; clients refresh ahead</text>
+
+  <text x="884" y="540" class="s" font-weight="700">Batch (TRM)</text>
+  <text x="884" y="558" class="s">service account of</text>
+  <text x="884" y="576" class="s">crisalid-agents, same header</text>
+
+  <!-- Keycloak interactions -->
+  <path d="M870 228 H792" class="kc"/>
+  <text x="830" y="215" text-anchor="middle" class="small">sign-in</text>
+
+  <path d="M792 430 H868" class="kc2"/>
+  <text x="830" y="404" text-anchor="middle" class="small">token</text>
+  <text x="830" y="417" text-anchor="middle" class="small">exchange</text>
+
+  <path d="M870 620 H792" class="kc"/>
+  <text x="830" y="607" text-anchor="middle" class="small">verification</text>
+
+  <!-- Legend -->
+  <path d="M60 800 H110" class="flow"/>
+  <text x="120" y="804" class="small">request carrying a token</text>
+  <path d="M320 800 H370" class="kc"/>
+  <text x="380" y="804" class="small">Keycloak interactions</text>
+</svg>

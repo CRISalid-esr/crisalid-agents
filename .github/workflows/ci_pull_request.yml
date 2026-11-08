@@ -33,23 +33,15 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - image: crisalid-agents-owui
-            dockerfile: docker/pipelines.Dockerfile
-          - image: crisalid-agents-chat-api
-            dockerfile: docker/chat-api.Dockerfile
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.image }} (no push)
+      - name: Build crisalid-agents-chat-api (no push)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/chat-api.Dockerfile
           push: false

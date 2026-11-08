@@ -21,12 +21,10 @@ Requirements: the topic index (`scripts/index_horizon_topics.py`, `HORIZON_OS_*`
 Run it:
 
 ```bash
-# OpenWebUI Pipelines server (model "Horizon topic finder")
-uv run python scripts/debug_openwebui_pipelines.py
 
 # Chat API
 uv run uvicorn chat_api.main:app --port 9100
 curl -N http://localhost:9100/agents/project_topic_matching/chat -H "Content-Type: application/json" \
-  -H "x-api-key: key1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Machine learning to restore damaged medieval manuscripts"}]}}'
 ```

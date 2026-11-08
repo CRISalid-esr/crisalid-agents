@@ -1,7 +1,5 @@
 .env
-.openwebui-pipelines
 __pycache__/
-openwebui_pipelines/**/valves.json
 .idea
 data/
 reports/

@@ -16,18 +16,18 @@ Configuration (env vars):
 
 - `${NAME}_MCP_TOOLBOX_URL` / `${NAME}_MCP_TOOLBOX_TOOLSET` — this agent's toolbox and
   toolset; when unset, `CRISALID_MCP_TOOLBOX_URL` / `CRISALID_MCP_TOOLBOX_TOOLSET` apply.
-- `KEYCLOAK_*` — service-account authentication to the toolbox (see the project README).
+- Tool calls carry the signed-in person's token exchanged by the chat API (`common/user_context.py`); see the
+  project README for the Keycloak configuration.
 
 What the framework provides (nothing to write per agent):
 
-- The event stream consumed by both adapters (`common/langgraph_agent.py`), the toolbox client
+- The event stream consumed by both routers (`common/langgraph_agent.py`), the toolbox client
   (`common/mcp_toolbox_client.py`), the `semantic_*` embedding helpers and the raw tool-call parser.
-- The OpenWebUI pipeline (`openwebui_pipelines/${name}_pipeline.py`) and the chat API route
-  `POST /agents/$name/chat`.
+- The chat API routes `POST /agents/$name/chat` (MUI X Chat) and `POST /v1/chat/completions` with
+  `model: "$name"` (OpenAI-compatible, OpenWebUI).
 
 Run it:
 
 ```bash
-uv run python scripts/debug_openwebui_pipelines.py      # OpenWebUI Pipelines server
 uv run uvicorn chat_api.main:app --port 9100             # chat API
 ```

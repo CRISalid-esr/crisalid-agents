@@ -5,21 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies (run both — uv sync resets the venv and wipes the pipelines extras)
+# Install dependencies
 uv sync --extra chat-api --extra topic-matching --extra trm
-uv pip install -r .openwebui-pipelines/requirements.txt
 
 # Tests (offline: agents are driven by a scripted fake chat model)
 uv run pytest
 
-# Scaffold a new agent (package + OpenWebUI stub + smoke test)
+# Scaffold a new agent (package + smoke test)
 uv run python scripts/create_new_agent.py <name> [--template dummy|mcp-toolbox] [--display-name ...] [--description ...]
-
-# Run Pipelines server (production)
-.openwebui-pipelines/start.sh
-
-# Debug Pipelines server in IDE (PyCharm)
-uv run python scripts/debug_openwebui_pipelines.py
 
 # Horizon topic index: local OpenSearch, then parse-only check and ingestion of HORIZON_WP_DIR
 docker compose -f docker/docker-compose.dev.yaml up -d
@@ -30,33 +23,31 @@ uv run python scripts/index_horizon_topics.py --recreate
 uv run python scripts/topic_researcher_match.py --list-clusters
 uv run python scripts/topic_researcher_match.py --cluster CL2 [--topic ID] [--out DIR]
 
-# Run chat API (MUI X Chat NDJSON streaming endpoint)
+# Run chat API (MUI X Chat NDJSON routes for sovisuplus, OpenAI-compatible routes for OpenWebUI)
 uv run uvicorn chat_api.main:app --port 9100 --reload
 
 # Debug chat API in IDE (PyCharm)
 uv run python scripts/debug_chat_api.py
 
-# Build deployment images (one per adapter, from the repo root)
-docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
+# Build the deployment image (from the repo root)
 docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
-
-**After any `uv add`, `uv remove`, or `uv sync`, re-run the `uv pip install` line** — `uv sync` resets the venv to exactly `pyproject.toml` and removes the OpenWebUI Pipelines extras installed separately.
 
 There is no linter configured.
 
 ## Architecture
 
-LangChain/LangGraph agents for the CRISalid ecosystem, exposed through two generic adapters. Agents contain only
-LangGraph code and business logic; adapters, streaming, discovery and Docker packaging are shared.
+LangChain/LangGraph agents for the CRISalid ecosystem, exposed through one FastAPI service with two routers (MUI X
+Chat for sovisuplus, OpenAI-compatible for OpenWebUI). Agents contain only LangGraph code and business logic;
+routers, streaming, authentication, discovery and Docker packaging are shared.
 
 ```
-common/                ← framework: agent contract, LangGraph/MCP Toolbox base classes, registry, adapters' shared code
+common/                ← framework: agent contract, LangGraph/MCP Toolbox base classes, registry, user context, token exchange
 common/horizon/        ← Horizon Europe WP topic index: PDF parser, OpenSearch mapping, ingestion, hybrid search
 trm/                   ← Topic-to-Researcher Match batch (LangGraph expand → retrieve → verify → score, reports)
 agents/<name>/         ← one package per agent (agent.py with create_agent(), system_prompt.md, README.md)
-openwebui_pipelines/   ← one two-line stub per agent: Pipeline = make_pipeline("<name>")
-chat_api/              ← FastAPI: GET /agents, POST /agents/{name}/chat (MUI X Chat NDJSON, port 9100)
+chat_api/              ← FastAPI (port 9100): auth.py (bearer JWT), allow_list.py, deps.py, main.py (/agents routes),
+                         openai_compat.py (/v1/models, /v1/chat/completions), streaming.py (NDJSON chunks)
 scripts/               ← create_new_agent.py (+ templates/), IDE debug launchers
 ```
 
@@ -64,12 +55,15 @@ scripts/               ← create_new_agent.py (+ templates/), IDE debug launche
 
 `BaseAgent(name, display_name, description)` with `astream(messages) -> AsyncIterator[str | ToolCall | ToolResult]`.
 `str` items are answer tokens; `ToolCall` is emitted as soon as the LLM decides a call (before it runs); `ToolResult`
-once it completes. `ainvoke` / `invoke` / `stream` (sync bridge for OpenWebUI threads) / `aclose` have defaults.
+once it completes. `ainvoke` / `invoke` / `stream` (sync bridge, used by tests) / `aclose` have defaults.
 
 - `common/langgraph_agent.py` — `LangGraphAgent`: implement `build_graph()` (a `MessagesState` graph with `agent` and
   `tools` nodes); translation of LangGraph stream parts into events is done here. Class attributes tune node names,
   an optional tool-result post-processing node, and argument suffixes hidden from UIs.
-- `common/mcp_toolbox_client.py` (toolset loading, optional Keycloak service-account auth), `common/embedding.py`
+- `common/mcp_toolbox_client.py` (toolset loading; token provider `delegated` = the signed-in person's exchanged token
+  read from `common/user_context.py` at each tool call, or `service_account` = client credentials, batch only),
+  `common/token_exchange.py` (RFC 8693 exchange of the user's token for the toolbox audience, cached per token),
+  `common/tool_rendering.py` (`<details>` tool blocks and status events for OpenWebUI), `common/embedding.py`
   (embedding provider) and `common/tool_calls.py` (Mistral raw tool-call recovery) and `common/semantic_params.py` (`semantic_*`
   parameter embedding and vector stripping) are shared, opt-in helpers.
   They hold no graph logic: every agent owns its graph in `agents/<name>/agent.py`.
@@ -120,23 +114,32 @@ per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluste
   failures itself from `locales/<lang>.json` (`i18n.py`). `create_agent(llm=…, settings=…, taxi=…, toolbox=…)` takes
   fakes for tests (`tests/sorbobot_fakes.py`). Needs `CRISALID_TAXI_URL` at runtime.
 
-### Adapters
+### Chat API
 
-- OpenWebUI: `common/openwebui.py` holds the whole pipeline (message conversion, `<details>` tool blocks with
-  truncation, spinner status events). The Pipelines server loads every top-level `*.py` in its pipelines directory,
-  which is why the shared code lives in `common/` and `openwebui_pipelines/` only contains stubs. Server on port 9099.
-- Chat API: `chat_api/main.py` (routes, auth, lifespan) and `chat_api/streaming.py` (events → NDJSON chunks). Called
-  server-to-server by the sovisuplus backend (no CORS). Inbound auth in `chat_api/auth.py`: `x-api-key` header vs the
-  comma-separated `API_KEYS` env var, toggled by `ENABLE_API_KEYS`. Its deps (fastapi, uvicorn, python-dotenv) live in
-  the `chat-api` optional-dependency group, **not** in core: the pipelines image must not override the fastapi/uvicorn
-  versions of its base image.
+One FastAPI app (`chat_api/main.py`, lifespan, `/health`, `/agents`, `/agents/{name}/chat` → `streaming.py` NDJSON
+chunks for MUI X Chat) including the OpenAI-compatible router `chat_api/openai_compat.py` (`/v1/models`,
+`/v1/chat/completions`, SSE `chat.completion.chunk` lines, tool executions as `<details>` blocks plus OpenWebUI status
+events). Called server-to-server (sovisuplus backend, OpenWebUI), no CORS.
+
+- Inbound auth (`chat_api/auth.py`): `Authorization: Bearer <Keycloak access token>` verified with the realm JWKS
+  (`iss` = `KEYCLOAK_ISSUER`, `aud` ∋ `CHAT_API_AUDIENCE`, `exp`, at least `MIN_TOKEN_TTL_SECONDS` left). Errors are
+  `401 {"error": "invalid_token" | "wrong_audience" | "token_expiring"}` (`ApiError` handler). `require_user` on chat
+  routes, `optional_user` on listings (the allow list applies only when a token is sent).
+- Allow list (`chat_api/allow_list.py`): `AGENT_ALLOW_LIST` = `<client-id>:<agent>,…;…` keyed on the `azp` claim;
+  `403 {"error": "agent_not_allowed"}`; empty variable = no restriction (local development).
+- Per turn (`chat_api/deps.py`): resolve the agent, check the allow list, exchange the token for the toolbox
+  (`toolbox_token_for`, skipped when `KEYCLOAK_CLIENT_ID` is unset), run the agent inside `stream_as_user` /
+  `bind_user` so the toolbox client finds the token. Tests sign tokens with a session key (`tests/jwt_fixtures.py`)
+  and install fakes with `set_verifier` / `set_allow_list` / `set_exchanger`.
+- Its deps (fastapi, uvicorn, python-dotenv) live in the `chat-api` optional-dependency group; `pyjwt[crypto]` and
+  `httpx` are core.
 
 ### Docker
 
-Two images built from the repo root, each shipping every agent: `docker/pipelines.Dockerfile` (base
-`ghcr.io/open-webui/pipelines`, copies `common/`, `agents/`, `openwebui_pipelines/*.py`) and
-`docker/chat-api.Dockerfile` (base `python:3.11-slim`, copies `common/`, `agents/`, `chat_api/`, installs the
-`chat-api` extra). Restrict what a deployment serves with `AGENTS`.
+One image built from the repo root, `docker/chat-api.Dockerfile` (base `python:3.11-slim`, copies `common/`,
+`agents/`, `chat_api/`, `trm/`, `scripts/`, installs the `chat-api`, `topic-matching` and `trm` extras; the
+entrypoint trusts CA certificates mounted under `/usr/local/share/ca-certificates/`). Restrict what a deployment
+serves with `AGENTS` and what each client may call with `AGENT_ALLOW_LIST`.
 
 ## Environment Variables
 
@@ -149,9 +152,12 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 | `CRISALID_MCP_TOOLBOX_URL` | MCP Toolbox server URL (default for every MCP Toolbox agent) |
 | `CRISALID_MCP_TOOLBOX_TOOLSET` | Toolset name to load from MCP Toolbox |
 | `<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET` | Per-agent overrides for agents generated from the `mcp-toolbox` template |
-| `KEYCLOAK_ISSUER` | Keycloak issuer URL (e.g. `https://keycloak.example.com/realms/my-realm`); omit to disable outbound toolbox auth |
-| `KEYCLOAK_CLIENT_ID` | Service account client ID (outbound toolbox auth) |
-| `KEYCLOAK_CLIENT_SECRET` | Service account client secret (outbound toolbox auth) |
+| `KEYCLOAK_ISSUER` | Keycloak issuer URL, public hostname (e.g. `https://keycloak.example.com/realms/my-realm`); required by the chat API (JWKS) |
+| `CHAT_API_AUDIENCE` | Expected `aud` of inbound tokens (default `crisalid-agents`) |
+| `MIN_TOKEN_TTL_SECONDS` | Minimum remaining life of an inbound token (default `120`) |
+| `AGENT_ALLOW_LIST` | Agents each client application (`azp` claim) may call, `client:agent,agent;client:…`; empty = no restriction |
+| `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | The `crisalid-agents` confidential client: token exchange for the toolbox (chat) and service account (batch); omit to send no token to the toolbox |
+| `MCP_AUDIENCE` | Audience of the exchanged toolbox token (default `crisalid-graph-mcp`) |
 | `KEYCLOAK_SSL_VERIFY` | Set to `false` to skip TLS verification (local dev with self-signed certs) |
 | `EMBEDDING_*` | Embedding service used for `semantic_*` tool parameters (see `.env.sample`) |
 | `HORIZON_WP_DIR` | Directory of the current programme's work programme PDFs (default `data/cff/he/2026-27`) |
@@ -161,15 +167,13 @@ Two images built from the repo root, each shipping every agent: `docker/pipeline
 | `SORBOBOT_*` | Sorbobot tuning: timeouts, taxi request, thresholds, sibling widening, ranking method, result sizes, languages (see `.env.sample`) |
 | `TRM_MODEL` | Dedicated model of the topic-to-researcher batch (required by `scripts/topic_researcher_match.py`) |
 | `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`, `TRM_OUTPUT_DIR` | TRM tuning (defaults 10 / 25 / 0.35 / 15 / 4 / `reports`) |
-| `ENABLE_API_KEYS` | Chat API inbound auth toggle; on unless set to `false` |
-| `API_KEYS` | Comma-separated valid values for the chat API `x-api-key` header |
 
 ## Conventions
 
 - Do not add file-path comments at the top of source files (e.g. `# some/path/file.py`).
 - LangGraph graphs are built manually with `StateGraph` + `ToolNode` — do not use `create_react_agent`.
-- New agents are created with `scripts/create_new_agent.py`; they must not import from `openwebui_pipelines/` or
-  `chat_api/`, and adapters must not import a specific agent (go through `common.registry`). Batch pipelines that are
+- New agents are created with `scripts/create_new_agent.py`; they must not import from `chat_api/`, and the chat API
+  must not import a specific agent (go through `common.registry`). Batch pipelines that are
   not chat agents (`trm/`) live at the repo root, never under `agents/`.
 - Use `uv run pytest`; tests never call a real LLM (see `tests/fake_llm.py`) nor a real OpenSearch (fake client in
   `tests/test_horizon_ingest.py`); `uv run pytest --run-pdf` additionally parses the real PDFs of `HORIZON_WP_DIR`.
