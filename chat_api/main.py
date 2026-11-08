@@ -15,6 +15,8 @@ Run with:
     uv run uvicorn chat_api.main:app --port 9100 --reload
 """
 
+import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,6 +27,13 @@ from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+# Application logs (token rejections, allow-list decisions, chat turns, agent failures) go to stderr next to the
+# uvicorn access log; LOG_LEVEL tunes their verbosity.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(levelname)s:     %(name)s: %(message)s",
+)
 
 from chat_api.allow_list import get_allow_list  # noqa: E402
 from chat_api.auth import ApiError, get_verifier, optional_user, require_user  # noqa: E402

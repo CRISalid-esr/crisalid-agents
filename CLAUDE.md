@@ -159,6 +159,7 @@ serves with `AGENTS` and what each client may call with `AGENT_ALLOW_LIST`.
 | `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | The `crisalid-agents` confidential client: token exchange for the toolbox (chat) and service account (batch); omit to send no token to the toolbox |
 | `MCP_AUDIENCE` | Audience of the exchanged toolbox token (default `crisalid-graph-mcp`) |
 | `KEYCLOAK_SSL_VERIFY` | Set to `false` to skip TLS verification (local dev with self-signed certs) |
+| `LOG_LEVEL` | Verbosity of the application log (default `INFO`; `WARNING` keeps token rejections and failures only) |
 | `EMBEDDING_*` | Embedding service used for `semantic_*` tool parameters (see `.env.sample`) |
 | `HORIZON_WP_DIR` | Directory of the current programme's work programme PDFs (default `data/cff/he/2026-27`) |
 | `HORIZON_OS_URL`, `HORIZON_OS_USER`, `HORIZON_OS_PASSWORD` | OpenSearch endpoint of the Horizon topic index |

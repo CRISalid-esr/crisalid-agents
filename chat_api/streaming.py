@@ -6,12 +6,15 @@ lines straight into the ChatBox runtime.
 """
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 
 from langchain_core.messages import BaseMessage
 
 from common.agent import BaseAgent, ToolCall, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 def _line(chunk: dict) -> str:
@@ -71,6 +74,7 @@ async def ndjson_chunks(agent: BaseAgent, messages: list[BaseMessage]) -> AsyncG
         yield _line({"type": "finish", "messageId": message_id})
 
     except Exception as exc:  # noqa: BLE001 — surface any agent failure in the chat
+        logger.exception("agent %s failed", agent.name)
         if (end := close_text()) is not None:
             yield end
         error_id = f"{message_id}-error"

@@ -12,6 +12,7 @@ Errors are ``401`` with ``WWW-Authenticate: Bearer error="invalid_token"`` and a
 """
 
 import asyncio
+import logging
 import os
 import ssl
 import time
@@ -22,6 +23,8 @@ from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from common.user_context import UserPrincipal
+
+logger = logging.getLogger(__name__)
 
 ALGORITHMS = ["RS256", "ES256"]
 DEFAULT_AUDIENCE = "crisalid-agents"
@@ -73,11 +76,24 @@ class TokenVerifier:
             self._jwk_client = jwt.PyJWKClient(self.jwks_url, cache_keys=True, ssl_context=context)
         return self._jwk_client.get_signing_key_from_jwt(token).key
 
+    def _reject(self, code: str, token: str, reason: str) -> AuthError:
+        """Log why a token is refused, with its unverified claims, so misconfigurations are readable in the log."""
+        try:
+            unverified = jwt.decode(token, options={"verify_signature": False})
+        except jwt.PyJWTError:
+            unverified = {}
+        logger.warning(
+            "token rejected (%s): %s — iss=%s aud=%s azp=%s (expected iss=%s aud=%s)",
+            code, reason, unverified.get("iss"), unverified.get("aud"), unverified.get("azp"),
+            self.issuer, self.audience,
+        )
+        return AuthError(code)
+
     async def verify(self, token: str) -> UserPrincipal:
         try:
             key = await asyncio.to_thread(self._resolve_key, token)
         except Exception as exc:  # noqa: BLE001 — unknown kid, malformed header, JWKS unreachable
-            raise AuthError("invalid_token") from exc
+            raise self._reject("invalid_token", token, f"signing key: {exc}") from exc
         try:
             claims = jwt.decode(
                 token,
@@ -88,11 +104,11 @@ class TokenVerifier:
                 options={"require": ["exp", "sub"]},
             )
         except jwt.InvalidAudienceError as exc:
-            raise AuthError("wrong_audience") from exc
+            raise self._reject("wrong_audience", token, str(exc)) from exc
         except jwt.PyJWTError as exc:
-            raise AuthError("invalid_token") from exc
+            raise self._reject("invalid_token", token, str(exc)) from exc
         if claims["exp"] - time.time() < self.min_ttl_seconds:
-            raise AuthError("token_expiring")
+            raise self._reject("token_expiring", token, f"{int(claims['exp'] - time.time())} s left")
         return UserPrincipal(
             sub=str(claims["sub"]),
             username=claims.get("preferred_username"),

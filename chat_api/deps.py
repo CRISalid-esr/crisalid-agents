@@ -54,7 +54,10 @@ def resolve_agent(name: str, principal: UserPrincipal) -> BaseAgent:
 
 
 def visible_agents(principal: UserPrincipal | None) -> list[dict]:
-    return get_allow_list().filter(principal, registry.describe_agents())
+    agents = get_allow_list().filter(principal, registry.describe_agents())
+    if principal is not None and not agents:
+        logger.warning("no agent allowed for azp=%s (AGENT_ALLOW_LIST)", principal.client_id)
+    return agents
 
 
 def log_turn(principal: UserPrincipal, agent_name: str, route: str) -> None:

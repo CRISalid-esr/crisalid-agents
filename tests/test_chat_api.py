@@ -124,3 +124,21 @@ def test_chat_without_allow_list_accepts_any_client(client, registered_dummy_age
     set_allow_list(AgentAllowList(""))
     response = client.post("/agents/dummy_agent/chat", json=PAYLOAD, headers=bearer(make_token(azp="anything")))
     assert response.status_code == 200
+
+
+def test_rejected_token_is_logged_with_its_claims(client, registered_dummy_agent, caplog):
+    with caplog.at_level("WARNING", logger="chat_api.auth"):
+        client.post("/agents/dummy_agent/chat", json=PAYLOAD,
+                    headers=bearer(make_token(issuer="https://elsewhere/realms/x", azp="sovisuplus")))
+    [record] = [r for r in caplog.records if r.name == "chat_api.auth"]
+    assert "token rejected (invalid_token)" in record.getMessage()
+    assert "iss=https://elsewhere/realms/x" in record.getMessage()
+    assert "azp=sovisuplus" in record.getMessage()
+    assert "expected iss=https://keycloak.test/realms/crisalid-inst" in record.getMessage()
+
+
+def test_client_without_any_agent_is_logged(client, registered_dummy_agent, monkeypatch, caplog):
+    monkeypatch.setenv("AGENTS", "dummy_agent")
+    with caplog.at_level("WARNING", logger="chat_api.deps"):
+        assert client.get("/agents", headers=bearer(make_token(azp="unknown"))).json() == []
+    assert any("no agent allowed for azp=unknown" in r.getMessage() for r in caplog.records)
