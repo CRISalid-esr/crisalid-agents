@@ -8,11 +8,6 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - image: crisalid-agents-chat-api
-            dockerfile: docker/chat-api.Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -43,17 +38,17 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.image }} (release tags)
+      - name: Build and push crisalid-agents-chat-api (release tags)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/chat-api.Dockerfile
           push: true
           tags: |
-            crisalidesr/${{ matrix.image }}:${{ steps.version.outputs.version }}
-            crisalidesr/${{ matrix.image }}:${{ steps.version.outputs.minor }}
-            crisalidesr/${{ matrix.image }}:${{ steps.version.outputs.major }}
-            crisalidesr/${{ matrix.image }}:latest
+            crisalidesr/crisalid-agents-chat-api:${{ steps.version.outputs.version }}
+            crisalidesr/crisalid-agents-chat-api:${{ steps.version.outputs.minor }}
+            crisalidesr/crisalid-agents-chat-api:${{ steps.version.outputs.major }}
+            crisalidesr/crisalid-agents-chat-api:latest
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.ref.name=${{ github.ref_name }}
