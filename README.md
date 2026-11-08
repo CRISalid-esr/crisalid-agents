@@ -3,9 +3,9 @@
 LangChain / LangGraph agents connected to the CRISalid ecosystem.
 
 The goal of this project is to provide reusable Python agents that can interact with CRISalid services and data sources,
-while remaining independent from any single chat interface. Every agent is exposed through two generic adapters — an
-OpenWebUI Pipeline and a FastAPI chat API for webapp frontends (MUI X Chat, sovisuplus) — without any adapter code
-written per agent.
+while remaining independent from any single chat interface. Every agent is exposed through one FastAPI service with two
+generic routers — an OpenAI-compatible one for OpenWebUI and a MUI X Chat one for webapp frontends (sovisuplus) —
+without any adapter code written per agent.
 
 ## Core idea
 
@@ -21,25 +21,26 @@ written per agent.
     * The agent contract (`BaseAgent`: a stream of answer tokens, tool calls and tool results).
     * `LangGraphAgent`: turns any `MessagesState` graph into that event stream (lazy build, streaming).
     * Shared, opt-in helpers: `MCPToolboxClient`, `semantic_*` parameter embedding, the raw tool-call parser.
-    * The registry discovering the agents, and the shared OpenWebUI pipeline code.
+    * The registry discovering the agents, the identity of the signed-in person (`user_context`, `token_exchange`).
 
-3. **Interface adapters**
+3. **Interface** (`chat_api/`)
 
-    * OpenWebUI Pipeline (`openwebui_pipelines/`, a two-line stub per agent) and the FastAPI chat API (`chat_api/`).
-    * Both serve every registered agent; the `AGENTS` env var restricts the set per deployment.
+    * One FastAPI service: `POST /agents/{name}/chat` (MUI X Chat NDJSON) and `POST /v1/chat/completions`
+      (OpenAI-compatible, OpenWebUI). Both routers serve every registered agent; `AGENTS` restricts the set per
+      deployment and `AGENT_ALLOW_LIST` the agents each client application may call.
 
 ```text
-OpenWebUI                                 Webapp backend (sovisuplus, MUI X Chat)
-  │                                         │
+OpenWebUI (System OAuth connection)       Webapp backend (sovisuplus, MUI X Chat)
+  │  Authorization: Bearer <user token>     │  Authorization: Bearer <user token>
   ▼                                         ▼
-openwebui_pipelines/<name>_pipeline.py    chat_api/  POST /agents/{name}/chat  (NDJSON, port 9100)
-  │                                         │
+chat_api/  /v1/models, /v1/chat/completions (SSE)   /agents, /agents/{name}/chat (NDJSON)   port 9100
+  │   verify token (iss, aud, exp) · allow list (azp) · token exchange for the MCP toolbox
   └──────────────────┬──────────────────────┘
                      ▼
         common/registry  →  agents/<name>/agent.py : create_agent()
                      │
                      ▼
-        common/  BaseAgent · LangGraphAgent · MCPToolboxClient
+        common/  BaseAgent · LangGraphAgent · MCPToolboxClient (user token bound to the request)
                      │
                      ▼
         LangGraph workflow → LangChain tools / MCP Toolbox / CRISalid services / Neo4j
@@ -60,7 +61,6 @@ agents/sorbobot/__init__.py
 agents/sorbobot/agent.py              # the only file with logic: a LangGraphAgent subclass owning its graph
 agents/sorbobot/system_prompt.md
 agents/sorbobot/README.md
-openwebui_pipelines/sorbobot_pipeline.py   # Pipeline = make_pipeline("sorbobot")
 tests/test_sorbobot.py                # offline smoke test
 ```
 
@@ -73,10 +73,10 @@ Two templates exist:
   (`<NAME>_MCP_TOOLBOX_URL` / `<NAME>_MCP_TOOLBOX_TOOLSET`, falling back to the `CRISALID_*` ones). The graph code
   is in the agent file, ready to be adapted.
 
-Options: `--no-openwebui` skips the pipeline stub, `--force` overwrites existing files.
+Option `--force` overwrites existing files.
 
-The agent is served as soon as its package exists under `agents/`: it appears in `GET /agents`, at
-`POST /agents/<name>/chat`, and as a model of the Pipelines server. Nothing else to register.
+The agent is served as soon as its package exists under `agents/`: it appears in `GET /agents` and `GET /v1/models`,
+at `POST /agents/<name>/chat`, and as the model `<name>` of `POST /v1/chat/completions`. Nothing else to register.
 
 ### What an agent looks like
 
@@ -96,211 +96,114 @@ def create_agent(llm=None):
     return SorbobotAgent(llm=llm)
 ```
 
-`LangGraphAgent` turns the graph into the event stream both adapters consume (answer tokens, `ToolCall` emitted
+`LangGraphAgent` turns the graph into the event stream both routers consume (answer tokens, `ToolCall` emitted
 before the tool runs, `ToolResult` after). Agents that are not LangGraph-shaped subclass `common.agent.BaseAgent`
 directly and implement `astream()`.
 
-## OpenWebUI Pipelines setup and Python dependency management
+## Setup and Python dependency management
 
-This project uses `uv`.
-
-Example setup:
+This project uses `uv`:
 
 ```bash
-uv sync --extra chat-api
+uv sync --extra chat-api --extra topic-matching --extra trm
 ```
 
-The `chat-api` extra pulls the FastAPI wrapper dependencies (fastapi, uvicorn). They are kept out of the core
-dependencies on purpose: the OpenWebUI Pipelines Docker image ships its own fastapi/uvicorn versions and must not have
-them overridden.
+The `chat-api` extra pulls the FastAPI service dependencies (fastapi, uvicorn, python-dotenv); `topic-matching` the
+Horizon topic index (opensearch-py, pypdf); `trm` the batch reports (jinja2, weasyprint). The virtual environment is
+expected under `.venv/`. Create and fill in the `.env` file by copying `.env.sample`.
 
-The local virtual environment is expected to be under:
-
-```text
-.venv/
-```
-
-The OpenWebUI Pipelines project is used as a local vendor dependency during development.
-
-Clone it into a hidden directory at the project root:
+## Running the chat API
 
 ```bash
-git clone https://github.com/open-webui/pipelines.git .openwebui-pipelines
+uv run uvicorn chat_api.main:app --port 9100 --reload
 ```
 
-Install the OpenWebUI Pipelines server dependencies into the current uv virtual environment:
+Routes:
+
+| Route | Client | Authentication |
+|---|---|---|
+| `GET /health` | probes | none |
+| `GET /agents` | sovisuplus | optional token; the allow list applies when one is sent |
+| `POST /agents/{name}/chat` | sovisuplus (MUI X Chat body, NDJSON chunks) | Bearer token |
+| `GET /v1/models` | OpenWebUI | optional token; the allow list applies when one is sent |
+| `POST /v1/chat/completions` | OpenWebUI (`model` = agent name, SSE when `stream: true`) | Bearer token |
+
+### Authentication
+
+Clients send the signed-in person's Keycloak access token: `Authorization: Bearer <JWT>`. The token is verified
+with the realm's JWKS: signature, `iss` = `KEYCLOAK_ISSUER`, `aud` ∋ `CHAT_API_AUDIENCE` (`crisalid-agents`), `exp`,
+and at least `MIN_TOKEN_TTL_SECONDS` of remaining life (clients refresh and retry on `401 token_expiring`). Errors
+are `401 {"error": "invalid_token" | "wrong_audience" | "token_expiring"}`.
+
+The `azp` claim (the client application the token was issued to) is checked against `AGENT_ALLOW_LIST`
+(`<client-id>:<agent>,<agent>;…`): `403 {"error": "agent_not_allowed"}` otherwise. An empty variable disables the
+check (local development).
+
+For the MCP toolbox, the chat API exchanges the user's token (RFC 8693, Keycloak standard token exchange, client
+`KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET`) for a token with audience `MCP_AUDIENCE` (`crisalid-graph-mcp`) and binds
+it to the request (`common/user_context.py`); `MCPToolboxClient` sends it with every tool call, so the toolbox can
+inject the person's identity into its queries. Without `KEYCLOAK_CLIENT_ID` the exchange is skipped and tool calls
+carry no token (toolbox running without authentication). Batch scripts keep the service-account grant
+(`token_provider="service_account"`).
 
 ```bash
-uv pip install -r .openwebui-pipelines/requirements.txt
+TOKEN=...   # a Keycloak access token with aud crisalid-agents (see the deployment documentation)
+curl http://localhost:9100/agents -H "Authorization: Bearer $TOKEN"
+
+curl -N http://localhost:9100/agents/generic_agent/chat \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Who works on machine learning?"}]}}'
+
+curl -N http://localhost:9100/v1/chat/completions \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"model": "generic_agent", "stream": true, "messages": [{"role": "user", "content": "Who works on machine learning?"}]}'
 ```
 
-> **Note:** `uv sync` (run automatically by `uv add` / `uv remove`) resets the virtual environment to `pyproject.toml`
-> only, removing any extras installed with `uv pip install`. Re-run the line above after every dependency change.
+## Running with OpenWebUI
 
-This is required because .openwebui-pipelines/start.sh launches the Pipelines FastAPI server from the cloned vendor
-project. The crisalid-agents project dependencies and the Pipelines server dependencies live in the same local .venv
-during development.
-The resulting layout should be similar to:
+OpenWebUI (0.13 or later) connects to the chat API as an OpenAI-compatible connection whose authentication type is
+**System OAuth**: it forwards the signed-in person's access token with every request, so OpenWebUI must itself
+authenticate its users with Keycloak (OIDC). See the OpenWebUI Keycloak SSO documentation for the provider side; the
+Keycloak clients and scopes are described in the deployment documentation.
 
-```text
-.
-├── .openwebui-pipelines
-├── .venv
-├── agents
-├── chat_api
-├── common
-├── openwebui_pipelines
-├── pyproject.toml
-└── scripts
-```
-
-Create and fill in the .env file by copying the .env.sample.
-
-## Running the agent as an OpenWebUI Pipeline
-
-1) Run the Pipelines server from the cloned Pipelines directory:
-
-```bash
-cd .openwebui-pipelines/
-
-PROJECT_ROOT="/path/to/the/directory/of/crisalid-agents"
-
-PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH" \
-PIPELINES_DIR="$PWD/../openwebui_pipelines" \
-PIPELINES_API_KEY="my-secret-api-key" \
-./start.sh --mode run
-```
-
-The Pipelines server should start on:
-
-```text
-http://localhost:9099
-```
-
-
-**WARNING**
-
-Should the initial start fail in importing a pipeline, said pipeline will be moved to a folder called "failed" in the folder "openwebui_pipelines". The pipeline will then not be loaded again until moved again out of "failed" and in the "openwebui_pipelines" folder.
-
-
-2) Then OpenWebUI itself should be launched separately in another terminal.
-
-### Without Keycloak authentication
-
-```bash
-DATA_DIR=~/.open-webui uvx --python 3.11 open-webui@0.9.5 serve --port 8081
-```
-
-It can be accessed at:
-
-```text
-http://localhost:8081
-```
-
-### With Keycloak authentication
-
-See the [OpenWebUI Keycloak SSO documentation](https://docs.openwebui.com/features/authentication-access/auth/sso/keycloak/) for the full configuration reference.
-
-When Keycloak uses a self-signed or locally-trusted certificate (e.g. via `mkcert`), build a CA bundle that includes both the system CAs and the local root CA, then pass it to OpenWebUI via the standard SSL env vars:
+When Keycloak uses a locally issued certificate (`mkcert`), build a CA bundle and pass it with the standard SSL env
+vars:
 
 ```bash
 CAROOT="$(mkcert -CAROOT)"
 cat /etc/ssl/certs/ca-certificates.crt "$CAROOT/rootCA.pem" > ~/.open-webui/ca-bundle.pem
 ```
 
-Then start OpenWebUI with the Keycloak OIDC parameters:
-
 ```bash
 SSL_CERT_FILE=~/.open-webui/ca-bundle.pem \
 REQUESTS_CA_BUNDLE=~/.open-webui/ca-bundle.pem \
 DATA_DIR=~/.open-webui \
 ENABLE_OAUTH_SIGNUP=true \
-OAUTH_CLIENT_ID=<client-id> \
+ENABLE_OAUTH_ID_TOKEN_COOKIE=false \
+OAUTH_CLIENT_ID=open-webui \
 OAUTH_CLIENT_SECRET=<client-secret> \
 OPENID_PROVIDER_URL=https://<keycloak-host>/realms/<realm>/.well-known/openid-configuration \
 OAUTH_PROVIDER_NAME=Keycloak \
-OPENID_REDIRECT_URI=http://localhost:8081/oauth/oidc/callback \
-uvx --python 3.11 open-webui@0.9.5 serve --port 8081
+OPENID_REDIRECT_URI=http://localhost:8080/oauth/oidc/callback \
+uvx --python 3.11 open-webui@latest serve
 ```
 
-It can be accessed at:
+Then, in **Admin panel → Settings → Connections**, add an OpenAI API connection with URL `http://localhost:9100/v1`,
+authentication **System OAuth**, no key, "Forward cookies" off. Each agent appears as a model named after its package.
+OpenWebUI's own background tasks (chat title, tags, follow-up suggestions) must use a direct LLM model, not an agent.
 
-```text
-http://localhost:8081
-```
+## Docker image
 
-3) In OpenWebUI, add an OpenAI-compatible connection pointing to:
-
-```text
-http://localhost:9099
-```
-
-using the same API key as above:
-
-```text
-my-secret-api-key
-```
-
-## OpenWebUI settings
-
-OpenWebUI may call the selected model for auxiliary tasks such as:
-
-* chat title generation,
-* tag generation,
-* follow-up suggestions.
-
-These OpenWebUI-generated calls should be disabled in OpenWebUI settings while using CRISalid
-agent pipelines.
-
-## Running the agents as a chat API (webapp frontends)
-
-The second adapter, `chat_api/`, exposes every registered agent to webapp frontends built with MUI X Chat
-(sovisuplus). `POST /agents/{name}/chat` streams NDJSON message chunks (text deltas and tool invocations),
-`GET /agents` lists the served agents, and `GET /health` is an unauthenticated health check.
+One image, built from the repository root:
 
 ```bash
-uv run uvicorn chat_api.main:app --port 9100 --reload
-```
-
-### Authentication
-
-The chat API is meant to be called server-to-server from the internal Docker network only, never directly from the
-browser (there is no CORS support). Inbound requests are authenticated with the same scheme as crisalid-apollo: the
-`x-api-key` header is checked against the comma-separated `API_KEYS` env var, and the check is enabled unless
-`ENABLE_API_KEYS` is set to `false`:
-
-```env
-ENABLE_API_KEYS="true"
-API_KEYS="key1,another_key"
-```
-
-Proper OIDC end-user authentication is planned for later.
-
-```bash
-curl http://localhost:9100/agents -H "x-api-key: key1"
-
-curl -N http://localhost:9100/agents/generic_agent/chat \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: key1" \
-  -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "Who works on machine learning?"}]}}'
-```
-
-## Docker images
-
-Each adapter has its own image, built from the repository root:
-
-```bash
-# OpenWebUI Pipelines wrapper (base image ghcr.io/open-webui/pipelines, port 9099)
-docker build -f docker/pipelines.Dockerfile -t crisalid-agents-owui .
-
-# FastAPI chat API wrapper (base image python:3.11-slim, port 9100)
 docker build -f docker/chat-api.Dockerfile -t crisalid-agents-chat-api .
 ```
 
-Both install the core dependencies and the `topic-matching` extra from `uv.lock` and ship every agent under
-`agents/`; only the chat-api image installs the `chat-api` and `trm` extras (plus `trm/` and `scripts/`, for the
-batch entry points). Runtime configuration is injected at deploy time (see `.env.sample`); set `AGENTS` to restrict
-the agents a deployment serves.
+It installs the core dependencies and the `chat-api`, `topic-matching` and `trm` extras from `uv.lock`, ships every
+agent under `agents/` plus `trm/` and `scripts/` (batch entry points), and trusts any CA certificate mounted under
+`/usr/local/share/ca-certificates/`. Runtime configuration is injected at deploy time (see `.env.sample`); set
+`AGENTS` to restrict the agents a deployment serves and `AGENT_ALLOW_LIST` the agents each client may call.
 
 ## Horizon Europe topic index
 
@@ -326,8 +229,7 @@ the parser version or the embedding model changed, so reruns are cheap and an in
 again. `--file <pdf>` indexes one file without the stale sweep; the report lists parse warnings and errors with file
 and page numbers, and the script exits non-zero on errors only.
 
-Requires the `topic-matching` extra (`uv sync --extra chat-api --extra topic-matching`, then the pipelines
-requirements line) and the `EMBEDDING_*` service (bge-m3, `EMBEDDING_DIMENSIONS=1024` sizes the vector fields).
+Requires the `topic-matching` extra (`uv sync --extra chat-api --extra topic-matching`) and the `EMBEDDING_*` service (bge-m3, `EMBEDDING_DIMENSIONS=1024` sizes the vector fields).
 Configuration: `HORIZON_WP_DIR`, `HORIZON_OS_URL`, `HORIZON_OS_USER` / `HORIZON_OS_PASSWORD`, `HORIZON_OS_INDEX`,
 `HORIZON_SEARCH_PIPELINE` (`horizon-hybrid-rrf` or `horizon-hybrid-minmax`).
 
@@ -362,39 +264,23 @@ reruns. Tuning: `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_M
 uv run pytest
 ```
 
-The suite is offline: agents are driven by a scripted fake chat model (`tests/fake_llm.py`) and both adapters are
-exercised end-to-end (event stream, OpenWebUI `<details>` blocks, NDJSON chunks, auth, scaffolder).
+The suite is offline: agents are driven by a scripted fake chat model (`tests/fake_llm.py`), tokens are signed with a
+key generated for the session (`tests/jwt_fixtures.py`), the token exchange is mocked, and both routers are
+exercised end-to-end (event stream, `<details>` blocks, NDJSON chunks and SSE, authentication, allow list,
+scaffolder).
 
 ## Debugging in PyCharm
 
-Two debug launchers are provided:
-
-```text
-scripts/debug_openwebui_pipelines.py   # Pipelines server on port 9099
-scripts/debug_chat_api.py              # chat API on port 9100
-```
-
-These scripts start the corresponding FastAPI app directly through Python (without `start.sh` or uvicorn's `--reload`
-subprocess). This makes IDE breakpoints available.
+`scripts/debug_chat_api.py` starts the chat API on port 9100 directly through Python (without uvicorn's `--reload`
+subprocess), which makes IDE breakpoints available.
 
 Typical PyCharm configuration:
 
 ```text
 Run → Edit Configurations → + → Python
-```
-
-Use:
-
-```text
-Script path:
-  /path/to/projects/crisalid-agents/scripts/debug_openwebui_pipelines.py
-  (or scripts/debug_chat_api.py)
-
-Working directory:
-  /path/to/projects/crisalid-agents
-
-Python interpreter:
-  /path/to/projects/crisalid-agents/.venv/bin/python
+  Script path:        /path/to/projects/crisalid-agents/scripts/debug_chat_api.py
+  Working directory:  /path/to/projects/crisalid-agents
+  Python interpreter: /path/to/projects/crisalid-agents/.venv/bin/python
 ```
 
 Then run the configuration in debug mode.
@@ -426,5 +312,5 @@ CRISALID_MCP_TOOLBOX_TOOLSET=crisalid-restricted
   `agents/project_topic_matching/README.md`.
 * **`generic_agent`** — a `LangGraphAgent` owning its ReAct loop; it connects at runtime to an external MCP Toolbox server
   (`CRISALID_MCP_TOOLBOX_URL`) and calls the tools of a named toolset (`CRISALID_MCP_TOOLBOX_TOOLSET`), with a
-  system prompt per toolset and a compacted rendering of the graph schema tool. When the `KEYCLOAK_*` env vars are
-  set, it authenticates to the toolbox with a Keycloak service account (client credentials).
+  system prompt per toolset and a compacted rendering of the graph schema tool. Its tool calls carry the token of the
+  signed-in person exchanged by the chat API, so that the toolbox can resolve "me" / "my" questions.

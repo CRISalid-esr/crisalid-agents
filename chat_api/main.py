@@ -1,8 +1,15 @@
-"""FastAPI chat API exposing every registered agent to MUI X Chat frontends.
+"""FastAPI chat API exposing every registered agent.
 
-- ``GET  /health``               unauthenticated health check
-- ``GET  /agents``               list of served agents (name, display name, description)
-- ``POST /agents/{name}/chat``   NDJSON stream of MUI X Chat message chunks
+- ``GET  /health``               liveness probe, no authentication
+- ``GET  /agents``               served agents (name, display name, description); filtered by the allow list
+                                 when a token is sent
+- ``POST /agents/{name}/chat``   MUI X Chat body, NDJSON stream of message chunks (SoVisu+)
+- ``GET  /v1/models``, ``POST /v1/chat/completions``   OpenAI-compatible routes (OpenWebUI), see
+                                 ``chat_api.openai_compat``
+
+Chat routes require the signed-in person's Keycloak access token (``chat_api.auth``), check the agent
+against the client's allow list (``chat_api.allow_list``) and exchange the token for the MCP toolbox
+(``common.token_exchange``) before running the agent with the identity bound (``common.user_context``).
 
 Run with:
     uv run uvicorn chat_api.main:app --port 9100 --reload
@@ -12,18 +19,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from chat_api.auth import require_api_key  # noqa: E402
+from chat_api.allow_list import get_allow_list  # noqa: E402
+from chat_api.auth import ApiError, get_verifier, optional_user, require_user  # noqa: E402
+from chat_api.deps import get_exchanger, log_turn, resolve_agent, toolbox_token_for, visible_agents  # noqa: E402
+from chat_api.openai_compat import router as openai_router  # noqa: E402
 from chat_api.streaming import ndjson_chunks  # noqa: E402
-from common.agent import BaseAgent  # noqa: E402
 from common.messages import message_from_role  # noqa: E402
-from common.registry import UnknownAgentError, registry  # noqa: E402
+from common.registry import registry  # noqa: E402
+from common.user_context import UserPrincipal, stream_as_user  # noqa: E402
 
 
 class ChatRequest(BaseModel):
@@ -56,24 +66,26 @@ def to_langchain_messages(request: ChatRequest) -> list[BaseMessage]:
     return result
 
 
-def resolve_agent(name: str) -> BaseAgent:
-    try:
-        return registry.get_agent(name)
-    except UnknownAgentError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail early on a missing KEYCLOAK_ISSUER and log the state of the optional pieces.
+    get_verifier()
+    get_allow_list()
+    get_exchanger()
     try:
         yield
     finally:
         await registry.aclose_all()
 
 
-# No CORS middleware: the chat API is only called server-to-server from the
-# internal Docker network (sovisuplus backend), never directly from a browser.
+# No CORS middleware: the chat API is called server-to-server (SoVisu+ backend, OpenWebUI), never from a browser.
 app = FastAPI(title="CRISalid agents chat API", lifespan=lifespan)
+app.include_router(openai_router)
+
+
+@app.exception_handler(ApiError)
+async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.code}, headers=exc.headers)
 
 
 @app.get("/health")
@@ -81,13 +93,16 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/agents", dependencies=[Depends(require_api_key)])
-async def list_agents() -> list[dict]:
-    return registry.describe_agents()
+@app.get("/agents")
+async def list_agents(principal: UserPrincipal | None = Depends(optional_user)) -> list[dict]:
+    return visible_agents(principal)
 
 
-@app.post("/agents/{name}/chat", dependencies=[Depends(require_api_key)])
-async def chat(name: str, request: ChatRequest) -> StreamingResponse:
-    agent = resolve_agent(name)
+@app.post("/agents/{name}/chat")
+async def chat(name: str, request: ChatRequest, principal: UserPrincipal = Depends(require_user)) -> StreamingResponse:
+    agent = resolve_agent(name, principal)
+    toolbox_token = await toolbox_token_for(principal)
     messages = to_langchain_messages(request)
-    return StreamingResponse(ndjson_chunks(agent, messages), media_type="application/x-ndjson")
+    log_turn(principal, agent.name, "agents")
+    stream = stream_as_user(principal, toolbox_token, ndjson_chunks(agent, messages))
+    return StreamingResponse(stream, media_type="application/x-ndjson")

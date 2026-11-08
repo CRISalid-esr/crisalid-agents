@@ -62,7 +62,6 @@ Read from the environment on the first message; an invalid value is a deployment
 ## Run it
 
 ```bash
-uv run python scripts/debug_openwebui_pipelines.py      # OpenWebUI Pipelines server (model "Sorbobot")
 uv run uvicorn chat_api.main:app --port 9100             # chat API: POST /agents/sorbobot/chat
 uv run pytest tests -k sorbobot                          # offline tests (fake LLM, taxi and toolbox)
 ```

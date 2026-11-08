@@ -50,7 +50,7 @@ browser ──(session cookie)──► OpenWebUI 0.13       ──► POST /v1/
                               connection auth_type      Authorization: Bearer AT(open-webui)   │ validate JWT
                               = system_oauth                                             │ (iss, aud=crisalid-agents,
                                                                                           │  exp, JWKS), allow list (azp)
-                                                                                          │ exchange AT → AT'(aud=crisalid-mcp)
+                                                                                          │ exchange AT → AT'(aud=crisalid-graph-mcp)
                                                                                           │ ContextVar(AT')
                                                                                           ▼
                                                                                    MCP toolbox (tools-auth.yaml)
@@ -66,7 +66,7 @@ Principles:
 1. Each client application authenticates its users with Keycloak (authorization code flow) as today. The ID token
    establishes the client's session; the **access token** obtained in the same flow is what the client forwards.
 2. Each service verifies a token issued for *it*: the chat API checks `aud = crisalid-agents`, the toolbox checks
-   `aud = crisalid-mcp`. A token is never passed through to a service it was not issued for.
+   `aud = crisalid-graph-mcp`. A token is never passed through to a service it was not issued for.
 3. Only the chat API can obtain toolbox tokens for a user (token exchange by a confidential client). The toolbox is
    not reachable with a client's own token.
 4. The identity used in queries comes from token claims injected by the toolbox, never from LLM-visible parameters or
@@ -79,8 +79,8 @@ Principles:
 | Token | Issued to | `aud` | Lifetime | Carried by |
 |---|---|---|---|---|
 | AT (user) | `sovisuplus` or `open-webui` | `crisalid-agents` (+ `account`) | 15 min (client override) | `Authorization: Bearer` to the chat API |
-| AT' (exchanged) | `crisalid-agents` | `crisalid-mcp` | remaining lifetime of AT | `crisalid-keycloak_token` header to the toolbox |
-| AT (service account) | `crisalid-agents` | `crisalid-mcp` | realm default | same header, batch only |
+| AT' (exchanged) | `crisalid-agents` | `crisalid-graph-mcp` | remaining lifetime of AT | `crisalid-keycloak_token` header to the toolbox |
+| AT (service account) | `crisalid-agents` | `crisalid-graph-mcp` | realm default | same header, batch only |
 
 Claims used: `sub`, `preferred_username`, `email`, `azp` (client the token was issued to), `exp`, `jti`.
 
@@ -115,12 +115,12 @@ The `azp` claim names the Keycloak client the token was issued to. `AGENT_ALLOW_
 
 1. Client `crisalid-agents`: confidential (*Client authentication* on), *Service accounts roles* on (batch),
    *Standard token exchange* on, standard and direct flows off, no redirect URIs.
-2. Client `crisalid-mcp`: confidential, every flow off (resource server only; it never authenticates).
+2. Client `crisalid-graph-mcp`: confidential, every flow off (resource server only; it never authenticates).
 3. Client `open-webui`: confidential, standard flow, redirect URI `https://<openwebui-host>/oauth/oidc/callback`
    (local: `http://localhost:8080/oauth/oidc/callback`).
 4. Client scope `crisalid-agents-audience` (default type) with an *Audience* mapper → included client audience
    `crisalid-agents`, added to the access token. Default scope of `sovisuplus` and `open-webui`.
-5. Client scope `crisalid-mcp-audience` (default type) with an *Audience* mapper → `crisalid-mcp`. Default scope of
+5. Client scope `crisalid-graph-mcp-audience` (default type) with an *Audience* mapper → `crisalid-graph-mcp`. Default scope of
    `crisalid-agents` only: it serves both the token exchange (the `audience` request parameter filters the audiences
    granted by the requester's scopes, it cannot add one) and the service account.
 6. Access token lifespan override 15 min on `sovisuplus` and `open-webui` (advanced settings of each client).
@@ -233,14 +233,14 @@ non-streaming responses; `<details>` rendering.
 - `mcp-toolbox/Dockerfile`: `TOOLBOX_VERSION` moved from `v1.1.0` to the current release (`v1.16.0` at the time of
   writing); the samples are re-run against it (the `number` → `float` alias patched in
   `common/mcp_toolbox_client.py` may become unnecessary with the matching `toolbox-core`).
-- `tools-auth.yaml`: `audience: ${MCP_AUDIENCE}` (value `crisalid-mcp`), `authorizationServer: ${KEYCLOAK_ISSUER}`
+- `tools-auth.yaml`: `audience: ${MCP_AUDIENCE}` (value `crisalid-graph-mcp`), `authorizationServer: ${KEYCLOAK_ISSUER}`
   (public issuer). Every tool of the served toolsets (`crisalid-restricted`, `sorbobot`, …) carries
   `authRequired: [crisalid-keycloak]`.
 - New tool `get-current-person` (toolsets `crisalid-restricted` and `sorbobot`): no LLM-visible parameter; one
-  authenticated parameter `user_login` bound to the `preferred_username` claim
+  authenticated parameter `username` bound to the `preferred_username` claim
   (`authServices: [{name: crisalid-keycloak, field: preferred_username}]`). The toolbox hides authenticated parameters
   from the manifest, so the LLM cannot supply it. Cypher:
-  `MATCH (p:Person)-[:HAS_IDENTIFIER]->(:AgentIdentifier {type: 'local', value: split($user_login, '@')[0]})`,
+  `MATCH (p:Person)-[:HAS_IDENTIFIER]->(:AgentIdentifier {type: 'local', value: split($username, '@')[0]})`,
   returning uid, names, identifiers and memberships; empty result (not an error) when no Person matches. The
   `split` normalises an eppn (`login@domain`) to the local identifier, the same rule as `stripDomainFromEppn` in
   SoVisu+; the README documents the two as twins.
@@ -294,7 +294,7 @@ non-streaming responses; `<details>` rendering.
 
 1. **Keycloak**: realm template and script, local stack without the dynamic backchannel, public hostname resolvable
    from the containers, 15 min lifespan on the two web clients. Done when a `curl` token exchange with a `sovisuplus`
-   user token returns a token with `aud: crisalid-mcp`, and the service-account path works through the public issuer.
+   user token returns a token with `aud: crisalid-graph-mcp`, and the service-account path works through the public issuer.
 2. **Toolbox**: binary upgrade, audience variable, `get-current-person`, auth on every served tool. Done when the
    delegated sample resolves the signed-in person and the service-account sample still works.
 3. **`crisalid-agents`**: §5. Done when `uv run pytest` passes and a local `curl` with a real token streams an answer

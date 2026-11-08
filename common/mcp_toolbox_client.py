@@ -1,11 +1,32 @@
+"""Client of the MCP toolbox (crisalid-ai-skills), with the token the toolbox expects on each tool call.
+
+Two token providers:
+
+- ``delegated`` (default, chat agents): the token exchanged by the chat API for the signed-in person, read
+  from ``common.user_context.current_toolbox_token`` at every tool call;
+- ``service_account`` (batch): a token of the ``KEYCLOAK_CLIENT_ID`` service account (``client_credentials``).
+
+Either is sent in the ``crisalid-keycloak_token`` header. When ``KEYCLOAK_ISSUER`` / ``KEYCLOAK_CLIENT_ID`` /
+``KEYCLOAK_CLIENT_SECRET`` are not all set, no token is sent (toolbox running without authentication).
+"""
+
 import os
 import time
-from typing import Callable
+from typing import Callable, Literal
 
 import httpx
 import toolbox_core.protocol as _tc_protocol
 from toolbox_core.protocol import Protocol
 from toolbox_langchain import ToolboxClient
+
+from common.user_context import current_toolbox_token
+
+TokenProvider = Literal["delegated", "service_account"]
+AUTH_SERVICE_NAME = "crisalid-keycloak"
+
+
+class NoUserTokenError(RuntimeError):
+    """A tool was called outside a request carrying the signed-in person's token."""
 
 # The toolbox server serialises float parameters as JSON Schema "number", but the
 # client's type map only contains "float".  Add the alias so float array parameters
@@ -22,7 +43,9 @@ class MCPToolboxClient:
         keycloak_client_id: str | None = None,
         keycloak_client_secret: str | None = None,
         keycloak_ssl_verify: bool | None = None,
+        token_provider: TokenProvider = "delegated",
     ):
+        self.token_provider: TokenProvider = token_provider
         self.toolbox_url = toolbox_url or os.getenv("CRISALID_MCP_TOOLBOX_URL", "http://127.0.0.1:5000")
         self.toolset_name = toolset_name or os.getenv("CRISALID_MCP_TOOLBOX_TOOLSET", "crisalid-restricted")
 
@@ -38,7 +61,18 @@ class MCPToolboxClient:
     def _auth_configured(self) -> bool:
         return bool(self._keycloak_issuer and self._keycloak_client_id and self._keycloak_client_secret)
 
+    @staticmethod
+    def _delegated_token() -> str:
+        token = current_toolbox_token.get()
+        if not token:
+            raise NoUserTokenError(
+                "no user token is bound to the current request; this tool needs the signed-in person's identity"
+            )
+        return token
+
     def _make_token_getter(self) -> Callable[[], str]:
+        if self.token_provider == "delegated":
+            return self._delegated_token
         issuer = self._keycloak_issuer
         client_id = self._keycloak_client_id
         client_secret = self._keycloak_client_secret
@@ -79,7 +113,7 @@ class MCPToolboxClient:
 
         kwargs = {}
         if self._auth_configured():
-            kwargs["auth_token_getters"] = {"crisalid-keycloak": self._make_token_getter()}
+            kwargs["auth_token_getters"] = {AUTH_SERVICE_NAME: self._make_token_getter()}
 
         self._tools = await self._client.aload_toolset(self.toolset_name, **kwargs)
 

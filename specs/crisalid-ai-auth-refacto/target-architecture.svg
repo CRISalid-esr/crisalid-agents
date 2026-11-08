@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1290" height="1330" viewBox="0 0 1290 1330" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2937">
+  <title>End-user identity from the chat clients to the MCP tools — target architecture</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-dashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/>
+    </marker>
+    <style>
+      .box { stroke-width: 1.5; rx: 8; }
+      .client { fill: #eff6ff; stroke: #3b82f6; }
+      .service { fill: #f0fdf4; stroke: #16a34a; }
+      .store { fill: #fdf4ff; stroke: #a855f7; }
+      .idp { fill: #fffbeb; stroke: #d97706; }
+      .edge { fill: #f9fafb; stroke: #9ca3af; }
+      .sub { fill: #ffffff; stroke: #86efac; stroke-width: 1; rx: 6; }
+      .t { font-weight: 700; font-size: 14px; }
+      .h { font-weight: 700; font-size: 12.5px; }
+      .s { font-size: 12px; }
+      .m { font-family: 'JetBrains Mono', 'Fira Mono', Consolas, monospace; font-size: 11.5px; }
+      .lbl { font-size: 12px; fill: #374151; }
+      .lblh { font-size: 12.5px; font-weight: 700; fill: #111827; }
+      .small { font-size: 11px; fill: #4b5563; }
+      .flow { stroke: #374151; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+      .kc { stroke: #6b7280; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow-dashed); }
+      .kc2 { stroke: #6b7280; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow-dashed); marker-start: url(#arrow-dashed); }
+    </style>
+  </defs>
+
+  <rect width="1290" height="1330" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="60" y="42" font-size="20" font-weight="700">End-user identity from the chat clients to the MCP tools</text>
+  <text x="60" y="64" class="s" fill="#4b5563">Target architecture: one crisalid-agents service serves both chat clients; the identity used in queries comes from token claims, never from the conversation.</text>
+
+  <!-- Browser -->
+  <rect x="310" y="95" width="260" height="64" class="box edge"/>
+  <text x="440" y="122" text-anchor="middle" class="t">Browser</text>
+  <text x="440" y="142" text-anchor="middle" class="s">signed-in person</text>
+
+  <path d="M440 159 V195 H235 V228" class="flow"/>
+  <path d="M440 159 V195 H645 V228" class="flow"/>
+  <text x="300" y="190" class="small">session cookie</text>
+  <text x="500" y="190" class="small">session cookie</text>
+
+  <!-- Chat clients -->
+  <rect x="60" y="230" width="350" height="130" class="box client"/>
+  <text x="76" y="254" class="t">SoVisu+ (Next.js)</text>
+  <text x="76" y="278" class="s">Signs the person in with Keycloak (authorization code flow)</text>
+  <text x="76" y="296" class="s">NextAuth JWT (encrypted cookie) holds the access token</text>
+  <text x="76" y="314" class="s">and the refresh token; the session exposes neither</text>
+  <text x="76" y="332" class="s">Refreshes the access token when &lt; 150 s remain</text>
+
+  <rect x="470" y="230" width="350" height="130" class="box client"/>
+  <text x="486" y="254" class="t">OpenWebUI 0.13</text>
+  <text x="486" y="278" class="s">Signs the person in with Keycloak (authorization code flow)</text>
+  <text x="486" y="296" class="s">Connection to the chat API: auth type “System OAuth”,</text>
+  <text x="486" y="314" class="s">forwards the signed-in person's own access token</text>
+  <text x="486" y="332" class="s">Refreshes the access token when &lt; 5 min remain</text>
+
+  <!-- Clients → chat API -->
+  <path d="M235 360 V468" class="flow"/>
+  <text x="247" y="385" class="lblh">POST /agents/{name}/chat</text>
+  <text x="247" y="403" class="lbl">Authorization: Bearer &lt;access token&gt;</text>
+  <text x="247" y="421" class="lbl">issued to client sovisuplus, audience crisalid-agents</text>
+  <text x="247" y="439" class="lbl">MUI X Chat body → NDJSON stream</text>
+
+  <path d="M645 360 V468" class="flow"/>
+  <text x="657" y="385" class="lblh">POST /v1/chat/completions</text>
+  <text x="657" y="403" class="lbl">Authorization: Bearer &lt;access token&gt;</text>
+  <text x="657" y="421" class="lbl">issued to client open-webui, audience crisalid-agents</text>
+  <text x="657" y="439" class="lbl">OpenAI chat body → SSE stream</text>
+
+  <!-- Chat API -->
+  <rect x="60" y="470" width="760" height="280" class="box service"/>
+  <text x="76" y="494" class="t">crisalid-agents chat API (FastAPI) — one service for both clients</text>
+
+  <rect x="80" y="508" width="340" height="36" class="sub"/>
+  <text x="250" y="531" text-anchor="middle" class="s">/agents/{name}/chat router · MUI X Chat, NDJSON</text>
+  <rect x="440" y="508" width="340" height="36" class="sub"/>
+  <text x="610" y="531" text-anchor="middle" class="s">/v1/chat/completions router · OpenAI-compatible, SSE</text>
+
+  <text x="76" y="568" class="h">Shared by both routers, on every chat request:</text>
+  <text x="76" y="588">1. Validate the access token: signature against the realm JWKS, issuer = KEYCLOAK_ISSUER,</text>
+  <text x="76" y="605">    audience contains crisalid-agents, at least 120 s left before expiry (else 401 token_expiring)</text>
+  <text x="76" y="627">2. Allow list: the azp claim (client the token was issued to) selects the agents that client may call</text>
+  <text x="76" y="644">    (else 403 agent_not_allowed)</text>
+  <text x="76" y="666">3. Token exchange (RFC 8693) with Keycloak: user access token → delegated access token with</text>
+  <text x="76" y="683">    audience crisalid-graph-mcp; cached per user token (jti claim) until it expires</text>
+  <text x="76" y="705">4. Bind the delegated access token to the request context (ContextVar) and run the agent;</text>
+  <text x="76" y="722">    every MCP tool call reads the token from there</text>
+
+  <!-- Chat API → toolbox -->
+  <path d="M440 750 V838" class="flow"/>
+  <text x="452" y="775" class="lblh">HTTP header crisalid-keycloak_token: &lt;delegated access token&gt;</text>
+  <text x="452" y="793" class="lbl">audience crisalid-graph-mcp, expires with the user's access token</text>
+  <text x="452" y="811" class="lbl">the toolbox is reachable only through the chat API</text>
+
+  <!-- MCP toolbox -->
+  <rect x="60" y="840" width="760" height="150" class="box service"/>
+  <text x="76" y="864" class="t">MCP toolbox (crisalid-ai-skills, tools-auth.yaml)</text>
+  <text x="76" y="888">Auth service crisalid-keycloak: verifies the token against the public issuer, audience crisalid-graph-mcp</text>
+  <text x="76" y="906">Every served tool carries authRequired: [crisalid-keycloak]</text>
+  <text x="76" y="924">get-current-person: no LLM-visible parameter; authenticated parameter username bound to the</text>
+  <text x="76" y="941">preferred_username claim (hidden from the manifest, so the LLM cannot supply it)</text>
+  <text x="76" y="963">Tools about a person keep an explicit person_uid; agents call get-current-person first for “my …” questions</text>
+
+  <!-- Toolbox → Neo4j -->
+  <path d="M440 990 V1048" class="flow"/>
+  <text x="452" y="1023" class="lbl">Cypher with the identity injected server-side ($username from the token claims)</text>
+
+  <!-- Neo4j -->
+  <rect x="310" y="1050" width="260" height="56" class="box store"/>
+  <text x="440" y="1073" text-anchor="middle" class="t">Neo4j</text>
+  <text x="440" y="1092" text-anchor="middle" class="s">institutional knowledge graph</text>
+
+  <!-- Keycloak -->
+  <rect x="990" y="230" width="260" height="760" class="box idp"/>
+  <text x="1004" y="254" class="t">Keycloak</text>
+  <text x="1004" y="272" class="s">realm crisalid-inst</text>
+  <text x="1004" y="290" class="s">One public issuer (KEYCLOAK_ISSUER)</text>
+  <text x="1004" y="308" class="s">for every service; the dynamic</text>
+  <text x="1004" y="326" class="s">backchannel is not used</text>
+
+  <text x="1004" y="358" class="h">Clients</text>
+  <text x="1004" y="376" class="s">sovisuplus, open-webui:</text>
+  <text x="1004" y="394" class="s">sign-in (authorization code flow);</text>
+  <text x="1004" y="412" class="s">access token audience</text>
+  <text x="1004" y="430" class="s">crisalid-agents, lifespan 15 min</text>
+  <text x="1004" y="454" class="s">crisalid-agents: confidential,</text>
+  <text x="1004" y="472" class="s">standard token exchange on,</text>
+  <text x="1004" y="490" class="s">service account for batches</text>
+  <text x="1004" y="514" class="s">crisalid-graph-mcp: resource server</text>
+  <text x="1004" y="532" class="s">only, never authenticates</text>
+
+  <text x="1004" y="564" class="h">Client scopes (audience mappers)</text>
+  <text x="1004" y="582" class="s">crisalid-agents-audience →</text>
+  <text x="1004" y="600" class="s">default scope of sovisuplus</text>
+  <text x="1004" y="618" class="s">and open-webui</text>
+  <text x="1004" y="642" class="s">crisalid-graph-mcp-audience →</text>
+  <text x="1004" y="660" class="s">default scope of crisalid-agents</text>
+  <text x="1004" y="678" class="s">(token exchange and service account)</text>
+
+  <text x="1004" y="710" class="h">Token lifetimes</text>
+  <text x="1004" y="728" class="s">access token: 15 min (web clients)</text>
+  <text x="1004" y="746" class="s">delegated token: expires with the</text>
+  <text x="1004" y="764" class="s">user's token; no refresh token</text>
+  <text x="1004" y="782" class="s">SSO session: idle 30 min, max 10 h</text>
+
+  <!-- Keycloak interactions -->
+  <path d="M990 300 H822" class="kc"/>
+  <text x="905" y="282" text-anchor="middle" class="small">sign-in of both clients:</text>
+  <text x="905" y="295" text-anchor="middle" class="small">ID token + access token</text>
+
+  <path d="M822 620 H988" class="kc2"/>
+  <text x="905" y="600" text-anchor="middle" class="small">JWKS (public keys)</text>
+  <text x="905" y="613" text-anchor="middle" class="small">token exchange:</text>
+  <text x="905" y="637" text-anchor="middle" class="small">user token → delegated token</text>
+
+  <path d="M990 915 H822" class="kc"/>
+  <text x="905" y="897" text-anchor="middle" class="small">JWKS (public keys)</text>
+  <text x="905" y="910" text-anchor="middle" class="small">token verification</text>
+
+  <!-- Batch note -->
+  <rect x="990" y="1010" width="260" height="96" class="box edge"/>
+  <text x="1004" y="1034" class="h">Batch (TRM), no end user</text>
+  <text x="1004" y="1052" class="s">crisalid-agents service account</text>
+  <text x="1004" y="1070" class="s">(client_credentials grant), audience</text>
+  <text x="1004" y="1088" class="s">crisalid-graph-mcp, same toolbox header</text>
+
+  <!-- Legend -->
+  <path d="M60 1138 H110" class="flow"/>
+  <text x="120" y="1142" class="small">request carrying a token</text>
+  <path d="M320 1138 H370" class="kc"/>
+  <text x="380" y="1142" class="small">Keycloak interactions (sign-in, JWKS, token exchange)</text>
+
+  <!-- Token glossary -->
+  <rect x="60" y="1160" width="1190" height="150" class="box edge"/>
+  <text x="76" y="1184" class="t">Tokens</text>
+  <text x="76" y="1206"><tspan class="h">Access token</tspan> — JWT issued by Keycloak to the web client (sovisuplus or open-webui) at sign-in; audience crisalid-agents; lifespan 15 min;</text>
+  <text x="76" y="1223">sent as Authorization: Bearer to the chat API. Claims used: sub, preferred_username, email, azp, exp, jti.</text>
+  <text x="76" y="1245"><tspan class="h">Delegated access token</tspan> — obtained by the chat API through RFC 8693 token exchange; audience crisalid-graph-mcp; expires with the user's access token;</text>
+  <text x="76" y="1262">sent in the crisalid-keycloak_token header to the MCP toolbox. Only the chat API (confidential client) can obtain one.</text>
+  <text x="76" y="1284"><tspan class="h">Service-account access token</tspan> — client_credentials grant of crisalid-agents; audience crisalid-graph-mcp; same header; non-interactive batch only.</text>
+</svg>

@@ -1,4 +1,4 @@
-"""Scaffold a new agent package, its OpenWebUI pipeline stub and a smoke test.
+"""Scaffold a new agent package and its smoke test.
 
     uv run python scripts/create_new_agent.py sorbobot --display-name "Sorbobot" \
         --description "Answers questions about ..." --template mcp-toolbox
@@ -39,7 +39,6 @@ def scaffold(
     root: Path = PROJECT_ROOT,
     display_name: str | None = None,
     description: str | None = None,
-    openwebui: bool = True,
     force: bool = False,
 ) -> list[Path]:
     if not _NAME_RE.match(name):
@@ -64,9 +63,6 @@ def scaffold(
         package_dir / "README.md": _render(template_dir / "README.md.tpl", context),
         root / "tests" / f"test_{name}.py": _render(template_dir / "test.py.tpl", context),
     }
-    if openwebui:
-        files[root / "openwebui_pipelines" / f"{name}_pipeline.py"] = _render(TEMPLATES_DIR / "pipeline.py.tpl", context)
-
     existing = [path for path in files if path.exists()]
     if existing and not force:
         listing = "\n".join(f"  {path.relative_to(root)}" for path in existing)
@@ -85,7 +81,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--description", help="one-line description shown by GET /agents")
     parser.add_argument("--template", choices=sorted(TEMPLATES), default="dummy",
                         help="dummy: LangGraph loop with one local tool; mcp-toolbox: ReAct over an MCP Toolbox toolset")
-    parser.add_argument("--no-openwebui", action="store_true", help="do not create the OpenWebUI pipeline stub")
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     args = parser.parse_args(argv)
 
@@ -95,7 +90,6 @@ def main(argv: list[str] | None = None) -> int:
             template=args.template,
             display_name=args.display_name,
             description=args.description,
-            openwebui=not args.no_openwebui,
             force=args.force,
         )
     except (ValueError, FileExistsError) as exc:
@@ -115,10 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  2. Set MODEL / API_KEY / LLM_API_BASE in .env")
     print("  3. uv run pytest")
     print("  4. uv run uvicorn chat_api.main:app --port 9100"
-          f"   →  POST /agents/{args.name}/chat")
-    if not args.no_openwebui:
-        print("     uv run python scripts/debug_openwebui_pipelines.py"
-              f"   →  model \"{args.display_name or display_name_for(args.name)}\"")
+          f"   →  POST /agents/{args.name}/chat, model \"{args.name}\" on /v1/chat/completions")
     return 0
 
 

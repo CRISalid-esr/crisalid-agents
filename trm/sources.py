@@ -47,7 +47,7 @@ def unit_label(row: dict) -> str:
 
 class ToolboxResearcherSource:
     def __init__(self, client: MCPToolboxClient | None = None):
-        self.client = client or MCPToolboxClient()
+        self.client = client or MCPToolboxClient(token_provider="service_account")
         self._tools: dict | None = None
         self._load_lock = asyncio.Lock()
         self.supports_internal_only = False
