@@ -3,6 +3,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
+def parse_roles(value: str) -> tuple[str, ...]:
+    """Comma-separated relator codes or URIs → lower-cased codes, without duplicates."""
+    roles = [item.strip().rsplit("/", 1)[-1].lower() for item in value.split(",")]
+    return tuple(dict.fromkeys(role for role in roles if role))
+
+
 @dataclass(frozen=True)
 class TRMSettings:
     model: str
@@ -12,6 +18,7 @@ class TRMSettings:
     max_researchers: int = 15
     concurrency: int = 4
     output_dir: Path = Path("reports")
+    contributor_roles: tuple[str, ...] = ("aut", "ctb")  # LoC relator codes that count; empty = every role
     publications_per_candidate: int = 8  # shown to the verification prompt
     top_publications_for_prescore: int = 5
     rank_constant: int = 60
@@ -32,6 +39,7 @@ class TRMSettings:
             max_researchers=int(env.get("TRM_MAX_RESEARCHERS", "15")),
             concurrency=int(env.get("TRM_CONCURRENCY", "4")),
             output_dir=Path(env.get("TRM_OUTPUT_DIR", "reports")),
+            contributor_roles=parse_roles(env.get("TRM_CONTRIBUTOR_ROLES", "aut,ctb")),
         )
         return replace(settings, **{k: v for k, v in overrides.items() if v is not None})
 
@@ -39,6 +47,7 @@ class TRMSettings:
         return {
             "model": self.model, "max_queries": self.max_queries, "max_candidates": self.max_candidates,
             "min_score": self.min_score, "max_researchers": self.max_researchers, "concurrency": self.concurrency,
+            "contributor_roles": list(self.contributor_roles),
             "publications_per_candidate": self.publications_per_candidate,
             "top_publications_for_prescore": self.top_publications_for_prescore, "rank_constant": self.rank_constant,
         }

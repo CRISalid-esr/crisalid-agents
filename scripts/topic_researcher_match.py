@@ -96,7 +96,7 @@ async def main(argv: list[str] | None = None) -> int:
                 print(f"{label}: no topic")
                 continue
             if source is None:
-                source = ToolboxResearcherSource()
+                source = ToolboxResearcherSource(roles=settings.contributor_roles)
                 llm = StructuredLLM(build_chat_model(settings.model), retries=settings.llm_retries)
             print(f"== {label}: {len(topics)} topic(s), model {settings.model}")
             run, paths = await run_cluster(
