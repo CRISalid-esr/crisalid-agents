@@ -85,8 +85,8 @@ Driven by `scripts/index_horizon_topics.py`. Deps in the `topic-matching` extra 
 Not a chat agent (lives outside `agents/`, no `create_agent`). `pipeline.py` builds a LangGraph graph per run with
 four nodes over injected services: `llm.py` (single-shot JSON prompts `expansion_prompt.md` /
 `verification_prompt.md`, `StructuredLLM` with JSON retries), `sources.py` (`ToolboxResearcherSource`: programmatic
-`publications-by-theme` with `internal_only` — filtered client-side when the toolbox lacks the parameter — and
-`get-person-memberships`), `scoring.py` (pure functions: RRF over queries × best cosine, top-5 pre-score, recency,
+`publications-by-theme` with `internal_only` and the `roles` allow-list of `TRM_CONTRIBUTOR_ROLES` — both filtered
+client-side when the toolbox lacks the parameter — and `get-person-memberships`), `scoring.py` (pure functions: RRF over queries × best cosine, top-5 pre-score, recency,
 per-topic normalisation, `pair_id`). `runner.py` iterates the topics of a cluster from the OpenSearch index and
 `report.py` renders JSON / Markdown / PDF (Jinja2 templates in `trm/templates/`, WeasyPrint in the `trm` extra).
 `TRM_MODEL` is required; every `TRM_*` setting is in `trm/config.py`.
@@ -167,6 +167,7 @@ serves with `AGENTS` and what each client may call with `AGENT_ALLOW_LIST`.
 | `SORBOBOT_*` | Sorbobot tuning: timeouts, taxi request, thresholds, sibling widening, ranking method, result sizes, languages (see `.env.sample`) |
 | `TRM_MODEL` | Dedicated model of the topic-to-researcher batch (required by `scripts/topic_researcher_match.py`) |
 | `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`, `TRM_OUTPUT_DIR` | TRM tuning (defaults 10 / 25 / 0.35 / 15 / 4 / `reports`) |
+| `TRM_CONTRIBUTOR_ROLES` | LoC relator codes a contribution must hold for TRM to credit a researcher (default `aut,ctb`; empty = every role) |
 
 ## Conventions
 

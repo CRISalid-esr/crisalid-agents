@@ -255,7 +255,9 @@ Outputs per cluster in `TRM_OUTPUT_DIR` (`--out`): `trm-<cluster>-<date>.json` (
 parameters and per-topic errors), `.md`, and `.pdf` (WeasyPrint, `trm` extra; skipped with `--no-pdf` or when the
 library is missing). A failed topic is recorded and never aborts the cluster; `--cluster` / `--topic` allow cheap
 reruns. Tuning: `TRM_MAX_QUERIES`, `TRM_MAX_CANDIDATES`, `TRM_MIN_SCORE`, `TRM_MAX_RESEARCHERS`, `TRM_CONCURRENCY`
-(`--min-score`, `--max-researchers`, `--max-candidates`, `--model` override them). Requires the topic index
+(`--min-score`, `--max-researchers`, `--max-candidates`, `--model` override them). `TRM_CONTRIBUTOR_ROLES` (default
+`aut,ctb`) lists the contribution roles that credit a researcher with a publication, so that thesis advisors and
+jury members are not counted as authors; empty keeps every role. Requires the topic index
 (`HORIZON_OS_*`), the embedding service and the MCP toolbox (`CRISALID_MCP_TOOLBOX_*`, Keycloak optional).
 
 ## Tests

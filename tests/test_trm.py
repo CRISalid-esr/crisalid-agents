@@ -7,13 +7,13 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from tests.fake_llm import ScriptedChatModel
-from trm.config import TRMSettings
+from trm.config import TRMSettings, parse_roles
 from trm.llm import LLMJsonError, StructuredLLM, flatten_queries, parse_json_object
 from trm.models import Candidate, Publication, RunResult, TopicResult, Verification, PublicationVerdict
 from trm.pipeline import build_graph, run_topic
 from trm.report import render_html, render_markdown, write_reports
 from trm.scoring import build_candidates, dedupe_publications, final_matches, publication_year, rank_publications, recency_weight
-from trm.sources import internal_only_filter, unit_label
+from trm.sources import ToolboxResearcherSource, internal_only_filter, roles_filter, unit_label
 
 SETTINGS = TRMSettings(model="test-model", max_queries=6, max_candidates=3, min_score=0.35, max_researchers=2,
                        concurrency=2, top_publications_for_prescore=2, rank_constant=60)
@@ -151,6 +151,92 @@ def test_internal_only_filter_and_unit_label():
     assert unit_label({"institution_uid": "u1", "long_labels": [], "short_labels": []}) == "u1"
 
 
+RELATOR = "http://id.loc.gov/vocabulary/relators/"
+
+
+def test_roles_filter():
+    rows = [
+        {"uid": "p1", "contributors": [
+            {"uid": "author", "roles": [RELATOR + "aut"]},
+            {"uid": "advisor", "roles": [RELATOR + "ths", RELATOR + "dgc"]},
+            {"uid": "short", "roles": ["AUT"]},
+            {"uid": "norole", "roles": []},
+            {"uid": "missing"},
+        ]},
+        {"uid": "p2", "contributors": [{"uid": "advisor", "roles": [RELATOR + "ths"]}]},
+    ]
+    assert roles_filter(rows, ()) is rows
+    kept = roles_filter(rows, ("aut", "ctb"))
+    assert [(r["uid"], [c["uid"] for c in r["contributors"]]) for r in kept] == [("p1", ["author", "short"])]
+    kept = roles_filter(rows, ("dgc",))  # any role of the contribution is enough, the others are kept as they are
+    assert kept == [{"uid": "p1", "contributors": [{"uid": "advisor", "roles": [RELATOR + "ths", RELATOR + "dgc"]}]}]
+    assert [r["uid"] for r in roles_filter(rows, ("ths",))] == ["p1", "p2"]
+
+
+def test_contributor_roles_setting(monkeypatch):
+    assert TRMSettings(model="m").contributor_roles == ("aut", "ctb")
+    assert parse_roles(" AUT , " + RELATOR + "ths,,aut") == ("aut", "ths")
+    monkeypatch.delenv("TRM_CONTRIBUTOR_ROLES", raising=False)
+    assert TRMSettings.from_env().contributor_roles == ("aut", "ctb")
+    monkeypatch.setenv("TRM_CONTRIBUTOR_ROLES", "aut, ths")
+    settings = TRMSettings.from_env()
+    assert settings.contributor_roles == ("aut", "ths") and settings.to_dict()["contributor_roles"] == ["aut", "ths"]
+    monkeypatch.setenv("TRM_CONTRIBUTOR_ROLES", "")
+    assert TRMSettings.from_env().contributor_roles == ()
+
+
+class FakePublicationsTool:
+    name = "publications-by-theme"
+
+    def __init__(self, rows, parameters):
+        from pydantic import create_model
+        self.args_schema = create_model("Args", **{name: (str, "") for name in parameters})
+        self.rows = rows
+        self.calls: list[dict] = []
+
+    async def ainvoke(self, args):
+        self.calls.append(args)
+        return json.dumps(self.rows)
+
+
+class FakeToolboxClient:
+    def __init__(self, tool):
+        self.tool = tool
+
+    async def aload_tools(self):
+        return [self.tool]
+
+    async def aclose(self):
+        return None
+
+
+@pytest.mark.parametrize("parameters, sent", [
+    (("internal_only", "roles"), {"internal_only": True, "roles": "aut,ctb"}),
+    (("internal_only",), {"internal_only": True}),
+    ((), {}),
+])
+async def test_toolbox_source_sends_roles_when_supported_and_always_filters(parameters, sent):
+    rows = [{"uid": "p1", "contributors": [
+        {"uid": "author", "external": False, "roles": [RELATOR + "aut"]},
+        {"uid": "advisor", "external": False, "roles": [RELATOR + "ths"]},
+        {"uid": "ext", "external": True, "roles": [RELATOR + "aut"]},
+    ]}, {"uid": "p2", "contributors": [{"uid": "advisor", "external": False, "roles": [RELATOR + "ths"]}]}]
+    tool = FakePublicationsTool(rows, parameters)
+    source = ToolboxResearcherSource(FakeToolboxClient(tool), roles=("aut", "ctb"))
+    found = await source.search_publications("q", [1.0], limit=5)
+    assert [(r["uid"], [c["uid"] for c in r["contributors"]]) for r in found] == [("p1", ["author"])]
+    call = dict(tool.calls[0])
+    assert {k: call.pop(k) for k in ("internal_only", "roles") if k in call} == sent
+    assert call == {"semantic_theme": "q", "semantic_theme_vector": [1.0], "limit": 5, "use_abstract": True}
+
+
+async def test_toolbox_source_without_roles_keeps_every_internal_contributor():
+    rows = [{"uid": "p2", "contributors": [{"uid": "advisor", "external": False, "roles": [RELATOR + "ths"]}]}]
+    tool = FakePublicationsTool(rows, ("internal_only", "roles"))
+    found = await ToolboxResearcherSource(FakeToolboxClient(tool)).search_publications("q", [1.0])
+    assert "roles" not in tool.calls[0] and [r["uid"] for r in found] == ["p2"]
+
+
 # ----------------------------------------------------------------------------- pipeline with fakes
 
 
@@ -163,7 +249,8 @@ class FakeEmbedder:
 
 
 class FakeSource:
-    def __init__(self, rows_by_query: dict[str, list[dict]], units: dict[str, list[str]]):
+    def __init__(self, rows_by_query: dict[str, list[dict]], units: dict[str, list[str]], roles: tuple[str, ...] = ()):
+        self.roles = roles
         self.rows_by_query = rows_by_query
         self.units = units
         self.queries: list[str] = []
@@ -171,7 +258,7 @@ class FakeSource:
 
     async def search_publications(self, query, vector, limit=100):
         self.queries.append(query)
-        return internal_only_filter(self.rows_by_query.get(query, []))
+        return internal_only_filter(roles_filter(self.rows_by_query.get(query, []), self.roles))
 
     async def memberships(self, person_uid):
         self.membership_calls.append(person_uid)
@@ -223,6 +310,26 @@ async def test_pipeline_end_to_end_with_fakes():
     assert sorted(source.membership_calls) == ["anna", "bob"]  # carl was not retained
     assert "ext" not in {c for r in result.researchers for c in [r.person_uid]}
     assert result.duration_seconds >= 0
+
+
+@pytest.mark.parametrize("roles, expected", [(("aut", "ctb"), ["anna"]), (("aut", "ths"), ["anna", "theo"])])
+async def test_pipeline_ignores_contributors_outside_the_allowed_roles(roles, expected):
+    def rows():
+        thesis = _row("p1", 0.9, ["anna", "theo"])
+        thesis["contributors"][0]["roles"] = [RELATOR + "aut"]
+        thesis["contributors"][1]["roles"] = [RELATOR + "ths"]
+        supervised = _row("p2", 0.8, ["theo"])  # theo is only the advisor here too
+        supervised["contributors"][0]["roles"] = [RELATOR + "ths"]
+        return {"creative startups": [thesis, supervised]}
+
+    settings = TRMSettings(model="m", min_score=0.0, concurrency=1, contributor_roles=roles)
+    llm = ScriptedChatModel(responses=[AIMessage(content=EXPANSION)]
+                            + [AIMessage(content=_verdict({"p1": True, "p2": True}, "strong"))] * len(expected), calls=[])
+    source = FakeSource(rows(), {}, roles=settings.contributor_roles)
+    result = await run_topic(build_graph(StructuredLLM(llm), FakeEmbedder(), source, settings), TOPIC)
+    assert result.error is None
+    assert sorted(r.person_uid for r in result.researchers) == expected
+    assert result.candidates_considered == len(expected)
 
 
 async def test_pipeline_records_topic_failure_and_verification_failure():
