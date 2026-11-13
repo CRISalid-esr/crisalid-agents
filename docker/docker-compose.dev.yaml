@@ -1,0 +1,25 @@
+# Local OpenSearch for the Horizon Europe topic index (development only; security plugin disabled).
+#   docker compose -f docker/docker-compose.dev.yaml up -d
+#   uv run python scripts/index_horizon_topics.py --recreate
+# Set HORIZON_OS_PORT if 9200 is already taken (then export HORIZON_OS_URL=http://localhost:<port>).
+services:
+  opensearch:
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION:-2.19.3}
+    container_name: crisalid-agents-opensearch
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "${HORIZON_OS_PORT:-9200}:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  opensearch-data:

@@ -24,7 +24,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra chat-api
+        run: uv sync --extra chat-api --extra topic-matching --extra trm
 
       - name: Test with pytest
         run: uv run pytest
@@ -33,23 +33,15 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - image: crisalid-agents-owui
-            dockerfile: docker/pipelines.Dockerfile
-          - image: crisalid-agents-chat-api
-            dockerfile: docker/chat-api.Dockerfile
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.image }} (no push)
+      - name: Build crisalid-agents-chat-api (no push)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/chat-api.Dockerfile
           push: false

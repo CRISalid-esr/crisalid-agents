@@ -1,0 +1,8 @@
+{
+  "input.empty": "Votre message est vide. Demandez-moi qui travaille sur un sujet de recherche, sur quoi travaille un chercheur, ou ce que couvre un domaine de recherche.",
+  "input.too_long": "Votre message est trop long (plus de {max_chars} caractères). Merci de le raccourcir et de reposer votre question.",
+  "errors.taxi_unavailable": "Le service d'appariement des thématiques est indisponible pour le moment : je ne peux pas rechercher d'experts ni de domaines. Merci de réessayer plus tard.",
+  "errors.graph_unavailable": "Le graphe de connaissances est indisponible pour le moment : je ne peux pas répondre. Merci de réessayer plus tard.",
+  "errors.llm_unavailable": "Le modèle de langue est indisponible pour le moment. Merci de réessayer plus tard.",
+  "errors.llm_empty_response": "Le modèle de langue n'a renvoyé aucune réponse. Merci de réessayer."
+}

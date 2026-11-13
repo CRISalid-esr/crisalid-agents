@@ -13,21 +13,18 @@ What this package contains:
 What the framework provides (nothing to write per agent):
 
 - `astream()` / `stream()` / `ainvoke()` / `invoke()` — the event stream (tokens, tool
-  calls, tool results) consumed by both adapters, see `common/agent.py`.
-- The OpenWebUI pipeline (`openwebui_pipelines/${name}_pipeline.py`, a two-line stub over
-  `common/openwebui.py`) and the chat API route `POST /agents/$name/chat` (`chat_api/`).
+  calls, tool results) consumed by both routers, see `common/agent.py`.
+- The chat API routes `POST /agents/$name/chat` (MUI X Chat) and `POST /v1/chat/completions` with
+  `model: "$name"` (OpenAI-compatible, OpenWebUI), see `chat_api/`.
 - Discovery through `common/registry.py`: the agent is served because its package exists
   under `agents/`.
 
 Run it:
 
 ```bash
-# OpenWebUI Pipelines server (model "$display_name")
-uv run python scripts/debug_openwebui_pipelines.py
-
-# Chat API
+# Chat API (TOKEN: a Keycloak access token with aud crisalid-agents)
 uv run uvicorn chat_api.main:app --port 9100
 curl -N http://localhost:9100/agents/$name/chat -H "Content-Type: application/json" \
-  -H "x-api-key: key1" \
+  -H "Authorization: Bearer $$TOKEN" \
   -d '{"message": {"role": "user", "parts": [{"type": "text", "text": "How many words in: the quick brown fox?"}]}}'
 ```

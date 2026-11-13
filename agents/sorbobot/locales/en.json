@@ -1,0 +1,8 @@
+{
+  "input.empty": "Your message is empty. Ask me who works on a research topic, what a researcher works on, or what a research domain covers.",
+  "input.too_long": "Your message is too long (more than {max_chars} characters). Please shorten it and ask again.",
+  "errors.taxi_unavailable": "The topic matching service is currently unavailable, so I cannot search for experts or domains right now. Please try again later.",
+  "errors.graph_unavailable": "The knowledge graph is currently unavailable, so I cannot answer right now. Please try again later.",
+  "errors.llm_unavailable": "The language model is currently unavailable. Please try again later.",
+  "errors.llm_empty_response": "The language model returned no answer. Please try again."
+}

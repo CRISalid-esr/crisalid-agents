@@ -33,7 +33,6 @@ def test_generated_agent_is_valid_python(tmp_path, template):
         "agents/sorbobot/system_prompt.md",
         "agents/sorbobot/README.md",
         "tests/test_sorbobot.py",
-        "openwebui_pipelines/sorbobot_pipeline.py",
     }
     agent_src = (tmp_path / "agents/sorbobot/agent.py").read_text()
     assert "class SorbobotAgent(" in agent_src
@@ -41,11 +40,6 @@ def test_generated_agent_is_valid_python(tmp_path, template):
     for path in created:
         if path.suffix == ".py":
             compile(path.read_text(), str(path), "exec")
-
-
-def test_no_openwebui_option(tmp_path):
-    created = scaffold("ptr", root=tmp_path, openwebui=False)
-    assert not any(p.name == "ptr_pipeline.py" for p in created)
 
 
 def test_refuses_to_overwrite_without_force(tmp_path):

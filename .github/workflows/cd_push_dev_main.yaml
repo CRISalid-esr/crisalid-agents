@@ -6,13 +6,6 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - image: crisalid-agents-owui
-            dockerfile: docker/pipelines.Dockerfile
-          - image: crisalid-agents-chat-api
-            dockerfile: docker/chat-api.Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -25,15 +18,15 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push ${{ matrix.image }}
+      - name: Build and push crisalid-agents-chat-api
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: docker/chat-api.Dockerfile
           push: true
           tags: |
-            crisalidesr/${{ matrix.image }}:0.1-dev
-            crisalidesr/${{ matrix.image }}:dev
+            crisalidesr/crisalid-agents-chat-api:0.1-dev
+            crisalidesr/crisalid-agents-chat-api:dev
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.ref.name=${{ github.ref_name }}

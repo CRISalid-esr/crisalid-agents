@@ -5,7 +5,10 @@ __pycache__/
 **/__pycache__/
 *.pyc
 .venv/
-scripts/
+# scripts/: only the batch entry points shipped in the chat-api image
+scripts/*
+!scripts/index_horizon_topics.py
+!scripts/topic_researcher_match.py
 tests/
 *.md
 specs/

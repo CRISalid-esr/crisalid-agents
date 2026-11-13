@@ -6,6 +6,11 @@ from common.registry import registry
 from tests.fake_llm import ScriptedChatModel, tool_call_message
 
 
+def pytest_addoption(parser):
+    parser.addoption("--run-pdf", action="store_true", default=False,
+                     help="also parse the real work programme PDFs of HORIZON_WP_DIR")
+
+
 def scripted_dummy_agent() -> DummyAgent:
     # One tool call, then a final answer streamed word by word.
     llm = ScriptedChatModel(
