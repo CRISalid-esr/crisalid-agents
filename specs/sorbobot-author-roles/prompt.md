@@ -1,5 +1,9 @@
 # Sorbobot : ne compter que les publications dont le chercheur est l'auteur
 
+Ce travail se fait dans deux dépôts à la fois : `crisalid-ai-skills` et `crisalid-agents`. Dans les deux, il faut
+travailler sur la branche `sorbobot-author-roles`. Dans `crisalid-ai-skills`, elle part de `dev-main`. Dans
+`crisalid-agents`, elle part de `22-sorbobot-implementation`.
+
 ## Contexte
 
 Dans le toolset `sorbobot` de `crisalid-ai-skills`, quatre outils ne gardent que les contributions qui ont le rôle
